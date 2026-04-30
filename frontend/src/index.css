@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body { font-family: 'Inter', system-ui, sans-serif; background: #F7F4FB; color: #1F1233; }
+
+.card { @apply bg-white rounded-xl shadow-soft border border-prestisa-50; }
+.btn { @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors text-sm; }
+.btn-primary { @apply btn bg-prestisa text-white hover:bg-prestisa-600 disabled:opacity-50; }
+.btn-ghost { @apply btn bg-prestisa-50 text-prestisa-700 hover:bg-prestisa-100; }
+.btn-danger { @apply btn bg-rose-600 text-white hover:bg-rose-700; }
+.btn-success { @apply btn bg-emerald-600 text-white hover:bg-emerald-700; }
+.input { @apply w-full px-3 py-2 rounded-lg border border-prestisa-100 focus:border-prestisa-400 focus:ring-2 focus:ring-prestisa-100 outline-none text-sm bg-white; }
+.label { @apply block text-xs font-semibold text-prestisa-700 uppercase tracking-wide mb-1; }
+.pill { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold; }
+.pill-draft    { @apply pill bg-slate-100 text-slate-700; }
+.pill-pending  { @apply pill bg-amber-100 text-amber-800; }
+.pill-approved { @apply pill bg-emerald-100 text-emerald-800; }
+.pill-rejected { @apply pill bg-rose-100 text-rose-800; }
+.diff-cell { @apply bg-amber-50 border-l-2 border-amber-400; }
+
+table.data { @apply w-full text-sm; }
+table.data thead th { @apply text-left px-3 py-2 bg-prestisa-50 text-prestisa-700 font-semibold border-b border-prestisa-100 text-xs uppercase tracking-wide; }
+table.data tbody td { @apply px-3 py-2 border-b border-prestisa-50 align-top; }
+table.data tbody tr:hover { @apply bg-prestisa-50/40; }

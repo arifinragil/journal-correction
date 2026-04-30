@@ -1,0 +1,13 @@
+{
+  "name": "journal-correction-tooling",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "capture": "node capture.js",
+    "prd": "node generate-prd.js"
+  },
+  "dependencies": {
+    "playwright-chromium": "^1.42.0",
+    "docx": "^8.5.0"
+  }
+}
