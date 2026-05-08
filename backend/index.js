@@ -368,6 +368,50 @@ app.post('/api/corrections/:id/submit', requireAuth, async (req, res) => {
   } finally { client.release(); }
 });
 
+async function pushCorrectionToMySQL(client, correctionId) {
+  // Read all corrected entries for this correction
+  const { rows: entries } = await client.query(
+    `SELECT source_journal_entry_id,
+            corrected_type, corrected_amount, corrected_account_id,
+            corrected_notes, corrected_transaction_date, corrected_company_code
+       FROM correction_journal_entries
+      WHERE correction_journal_id = $1`,
+    [correctionId]
+  );
+  if (entries.length === 0) throw new Error('No entries to sync');
+
+  const conn = await mysqlPool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (const e of entries) {
+      const [result] = await conn.query(
+        `UPDATE journal_entries
+            SET type = ?, amount = ?, account_id = ?, notes = ?,
+                transaction_date = ?, company_code = ?, updated_at = NOW()
+          WHERE id = ?`,
+        [
+          e.corrected_type,
+          e.corrected_amount,
+          e.corrected_account_id,
+          e.corrected_notes,
+          e.corrected_transaction_date,
+          e.corrected_company_code,
+          e.source_journal_entry_id,
+        ]
+      );
+      if (result.affectedRows !== 1) {
+        throw new Error(`journal_entries id=${e.source_journal_entry_id} not found or not updated`);
+      }
+    }
+    await conn.commit();
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 async function reviewAction(req, res, action) {
   const id = parseInt(req.params.id);
   const newStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
@@ -387,8 +431,30 @@ async function reviewAction(req, res, action) {
     if (rows[0].created_by === req.session.userId) {
       await client.query('ROLLBACK'); return res.status(403).json({ error: 'Cannot review your own correction' });
     }
+
+    // For APPROVE: push corrections to MySQL prod first. If it fails, rollback PG (status stays PENDING).
+    if (action === 'APPROVE') {
+      try {
+        await pushCorrectionToMySQL(client, id);
+      } catch (err) {
+        await client.query('ROLLBACK');
+        // Log failure on a fresh PG connection so the audit trail is preserved
+        try {
+          await pg.query(
+            `INSERT INTO correction_logs (correction_journal_id, action, actor_user_id, payload_json)
+             VALUES ($1, 'MYSQL_SYNC_FAILED', $2, $3)`,
+            [id, req.session.userId, JSON.stringify({ error: err.message })]
+          );
+        } catch {}
+        return res.status(502).json({ error: `MySQL sync failed: ${err.message}. Status tetap PENDING.` });
+      }
+    }
+
     await client.query(
-      `UPDATE correction_journals SET status = $1, reviewed_by = $2, reviewed_at = NOW(), review_note = $3 WHERE id = $4`,
+      `UPDATE correction_journals
+         SET status = $1::varchar, reviewed_by = $2, reviewed_at = NOW(), review_note = $3,
+             synced_to_mysql_at = CASE WHEN $1::varchar = 'APPROVED' THEN NOW() ELSE synced_to_mysql_at END
+       WHERE id = $4`,
       [newStatus, req.session.userId, note, id]
     );
     await client.query(

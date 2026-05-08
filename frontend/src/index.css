@@ -18,7 +18,7 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #F7F4FB; color: 
 .pill-pending  { @apply pill bg-amber-100 text-amber-800; }
 .pill-approved { @apply pill bg-emerald-100 text-emerald-800; }
 .pill-rejected { @apply pill bg-rose-100 text-rose-800; }
-.diff-cell { @apply bg-amber-50 border-l-2 border-amber-400; }
+.diff-cell { @apply !bg-rose-100 !text-rose-800 font-semibold ring-1 ring-inset ring-rose-400; }
 
 table.data { @apply w-full text-sm; }
 table.data thead th { @apply text-left px-3 py-2 bg-prestisa-50 text-prestisa-700 font-semibold border-b border-prestisa-100 text-xs uppercase tracking-wide; }

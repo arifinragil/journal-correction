@@ -8,6 +8,9 @@ function diffCell(a, b) {
   return same ? '' : 'diff-cell';
 }
 
+const ORIG_BG = 'bg-slate-50';
+const CORR_BG = 'bg-amber-50/60';
+
 export default function CorrectionDetailPage() {
   const { id } = useParams();
   const user = useContext(AuthCtx);
@@ -15,9 +18,15 @@ export default function CorrectionDetailPage() {
   const [data, setData] = useState(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState(null); // { type: 'success'|'error', msg }
 
   const load = () => api.get(`/corrections/${id}`).then(r => setData(r.data));
   useEffect(load, [id]);
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 4000);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   if (!data) return <div className="text-prestisa-400">Memuat…</div>;
   const { header: h, entries, attachments, logs } = data;
@@ -37,12 +46,34 @@ export default function CorrectionDetailPage() {
       await api.post(`/corrections/${id}/${path}`, body);
       await load();
       setNote('');
-    } catch (e) { alert(e.response?.data?.error || e.message); }
+      const msg = path === 'approve'
+        ? '✓ Koreksi di-APPROVE & journal_entries di MySQL telah ter-update.'
+        : path === 'reject'
+        ? '✗ Koreksi di-REJECT. Maker dapat melakukan re-submit.'
+        : path === 'submit'
+        ? '↗ Koreksi disubmit untuk approval.'
+        : '✓ Aksi berhasil.';
+      setFlash({ type: 'success', msg });
+    } catch (e) {
+      setFlash({ type: 'error', msg: e.response?.data?.error || e.message });
+    }
     finally { setBusy(false); }
   };
 
   return (
     <div className="space-y-4">
+      {flash && (
+        <div className={`fixed top-6 right-6 z-50 max-w-sm rounded-xl shadow-lg border px-4 py-3 text-sm font-medium animate-[slidein_0.2s_ease-out] ${
+          flash.type === 'success'
+            ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+            : 'bg-rose-50 border-rose-300 text-rose-800'
+        }`}>
+          <div className="flex items-start justify-between gap-3">
+            <div>{flash.msg}</div>
+            <button onClick={() => setFlash(null)} className="text-prestisa-400 hover:text-prestisa-700 -mt-0.5">×</button>
+          </div>
+        </div>
+      )}
       <div className="card p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
@@ -74,41 +105,53 @@ export default function CorrectionDetailPage() {
         <table className="data">
           <thead>
             <tr>
-              <th colSpan={6} className="text-center bg-slate-100">ORIGINAL</th>
-              <th colSpan={6} className="text-center bg-amber-50">CORRECTED</th>
+              <th rowSpan={2} className="bg-prestisa-50 text-prestisa-700">Entry ID</th>
+              <th colSpan={6} className="text-center bg-slate-200 text-slate-700 border-l-2 border-slate-400">ORIGINAL</th>
+              <th colSpan={6} className="text-center bg-amber-200/70 text-amber-900 border-l-2 border-amber-400">CORRECTED</th>
             </tr>
             <tr>
-              <th>Type</th><th>Account</th><th className="text-right">Amount</th><th>Notes</th><th>Date</th><th>Co.</th>
-              <th>Type</th><th>Account</th><th className="text-right">Amount</th><th>Notes</th><th>Date</th><th>Co.</th>
+              <th className={`${ORIG_BG} border-l-2 border-slate-400`}>Type</th>
+              <th className={ORIG_BG}>Account</th>
+              <th className={`text-right ${ORIG_BG}`}>Amount</th>
+              <th className={ORIG_BG}>Notes</th>
+              <th className={ORIG_BG}>Date</th>
+              <th className={ORIG_BG}>Co.</th>
+              <th className={`${CORR_BG} border-l-2 border-amber-400`}>Type</th>
+              <th className={CORR_BG}>Account</th>
+              <th className={`text-right ${CORR_BG}`}>Amount</th>
+              <th className={CORR_BG}>Notes</th>
+              <th className={CORR_BG}>Date</th>
+              <th className={CORR_BG}>Co.</th>
             </tr>
           </thead>
           <tbody>
             {entries.map(e => (
               <tr key={e.id}>
-                <td><span className={`pill ${e.original_type.toLowerCase() === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{e.original_type.toUpperCase()}</span></td>
-                <td className="text-xs"><div className="font-mono">{e.original_account_code}</div><div className="text-prestisa-500">{e.original_account_name}</div></td>
-                <td className="text-right font-mono">{fmtIDR(e.original_amount)}</td>
-                <td className="text-xs max-w-[160px] truncate" title={e.original_notes}>{e.original_notes}</td>
-                <td className="text-xs">{fmtDateOnly(e.original_transaction_date)}</td>
-                <td className="text-xs">{e.original_company_code}</td>
+                <td className="font-mono text-xs text-prestisa-700 bg-prestisa-50/50">#{e.source_journal_entry_id}</td>
+                <td className={`${ORIG_BG} border-l-2 border-slate-300`}><span className={`pill ${e.original_type.toLowerCase() === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{e.original_type.toUpperCase()}</span></td>
+                <td className={`text-xs ${ORIG_BG}`}><div className="font-mono">{e.original_account_code}</div><div className="text-prestisa-500">{e.original_account_name}</div></td>
+                <td className={`text-right font-mono ${ORIG_BG}`}>{fmtIDR(e.original_amount)}</td>
+                <td className={`text-xs max-w-[160px] truncate ${ORIG_BG}`} title={e.original_notes}>{e.original_notes}</td>
+                <td className={`text-xs ${ORIG_BG}`}>{fmtDateOnly(e.original_transaction_date)}</td>
+                <td className={`text-xs ${ORIG_BG}`}>{e.original_company_code}</td>
 
-                <td className={diffCell(e.original_type, e.corrected_type)}><span className={`pill ${e.corrected_type.toLowerCase() === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{e.corrected_type.toUpperCase()}</span></td>
-                <td className={`text-xs ${diffCell(e.original_account_id, e.corrected_account_id) || diffCell(e.original_account_name, e.corrected_account_name)}`}>
+                <td className={`${CORR_BG} border-l-2 border-amber-400 ${diffCell(e.original_type, e.corrected_type)}`}><span className={`pill ${e.corrected_type.toLowerCase() === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{e.corrected_type.toUpperCase()}</span></td>
+                <td className={`text-xs ${CORR_BG} ${diffCell(e.original_account_id, e.corrected_account_id) || diffCell(e.original_account_name, e.corrected_account_name)}`}>
                   <div className="font-mono">{e.corrected_account_code}</div><div className="text-prestisa-500">{e.corrected_account_name}</div>
                 </td>
-                <td className={`text-right font-mono ${diffCell(e.original_amount, e.corrected_amount)}`}>{fmtIDR(e.corrected_amount)}</td>
-                <td className={`text-xs max-w-[160px] truncate ${diffCell(e.original_notes, e.corrected_notes)}`} title={e.corrected_notes}>{e.corrected_notes}</td>
-                <td className={`text-xs ${diffCell(e.original_transaction_date, e.corrected_transaction_date)}`}>{fmtDateOnly(e.corrected_transaction_date)}</td>
-                <td className={`text-xs ${diffCell(e.original_company_code, e.corrected_company_code)}`}>{e.corrected_company_code}</td>
+                <td className={`text-right font-mono ${CORR_BG} ${diffCell(e.original_amount, e.corrected_amount)}`}>{fmtIDR(e.corrected_amount)}</td>
+                <td className={`text-xs max-w-[160px] truncate ${CORR_BG} ${diffCell(e.original_notes, e.corrected_notes)}`} title={e.corrected_notes}>{e.corrected_notes}</td>
+                <td className={`text-xs ${CORR_BG} ${diffCell(e.original_transaction_date, e.corrected_transaction_date)}`}>{fmtDateOnly(e.corrected_transaction_date)}</td>
+                <td className={`text-xs ${CORR_BG} ${diffCell(e.original_company_code, e.corrected_company_code)}`}>{e.corrected_company_code}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
-            <tr className="bg-prestisa-50 font-semibold">
-              <td colSpan={6} className="text-right text-xs">
+            <tr className="font-semibold">
+              <td colSpan={7} className="text-right text-xs bg-slate-100 border-l-2 border-slate-400">
                 Debit: <span className="font-mono">{fmtIDR(totalOrigD)}</span> · Credit: <span className="font-mono">{fmtIDR(totalOrigC)}</span>
               </td>
-              <td colSpan={6} className="text-right text-xs">
+              <td colSpan={6} className="text-right text-xs bg-amber-100/70 border-l-2 border-amber-400">
                 Debit: <span className="font-mono">{fmtIDR(totalCorrD)}</span> · Credit: <span className="font-mono">{fmtIDR(totalCorrC)}</span>
                 {Math.abs(totalCorrD - totalCorrC) < 0.01 ? <span className="ml-2 pill-approved">BALANCED</span> : <span className="ml-2 pill-rejected">NOT BALANCED</span>}
               </td>

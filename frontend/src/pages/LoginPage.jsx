@@ -20,7 +20,7 @@ export default function LoginPage({ onLoggedIn }) {
 
   return (
     <div className="min-h-full flex">
-      <div className="hidden md:flex md:w-1/2 bg-gradient-to-br from-prestisa-600 to-prestisa-900 text-white p-12 flex-col justify-between relative overflow-hidden">
+      <div className="hidden md:flex md:w-1/2 bg-gradient-to-br from-prestisa-600 to-prestisa-900 text-white p-12 flex-col justify-between">
         <div>
           <img src="/logo-white.png" className="h-12 mb-10" alt="Prestisa" />
           <h2 className="text-3xl font-extrabold leading-tight">Correction Journals</h2>
@@ -46,7 +46,6 @@ export default function LoginPage({ onLoggedIn }) {
             Connected With Excellence · journal.prestisa.net
           </div>
         </div>
-        <img src="/hero.png" className="absolute right-[-60px] bottom-[-40px] w-72 opacity-20 pointer-events-none" alt="" />
       </div>
       <div className="flex-1 flex items-center justify-center p-8 bg-prestisa-50/40">
         <form onSubmit={submit} className="card w-full max-w-md p-8">
@@ -63,12 +62,6 @@ export default function LoginPage({ onLoggedIn }) {
             <input type="password" className="input" value={password} onChange={e => setP(e.target.value)} />
           </div>
           <button disabled={busy} className="btn-primary w-full">{busy ? 'Memproses…' : 'Masuk'}</button>
-          <div className="mt-6 pt-4 border-t border-prestisa-100 text-xs text-prestisa-500">
-            <div className="font-semibold mb-1">Demo akun:</div>
-            <code className="block">maker1 / password123</code>
-            <code className="block">approver1 / password123</code>
-            <code className="block">admin / admin123</code>
-          </div>
         </form>
       </div>
     </div>

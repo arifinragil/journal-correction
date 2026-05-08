@@ -9,13 +9,17 @@ export default function CorrectionListPage() {
   const [status, setStatus] = useState('');
   const [q, setQ] = useState('');
   const [mine, setMine] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const load = () => {
+    setLoading(true);
     const params = {};
     if (status) params.status = status;
     if (q) params.q = q;
     if (mine) params.mine = '1';
-    api.get('/corrections', { params }).then(r => setItems(r.data));
+    api.get('/corrections', { params })
+      .then(r => setItems(r.data))
+      .finally(() => setLoading(false));
   };
   useEffect(load, [status, mine]);
 
@@ -50,7 +54,8 @@ export default function CorrectionListPage() {
             </tr>
           </thead>
           <tbody>
-            {items.map(it => (
+            {loading && <tr><td colSpan={10} className="text-center py-10 text-prestisa-400">Memuat data koreksi…</td></tr>}
+            {!loading && items.map(it => (
               <tr key={it.id}>
                 <td><Link to={`/corrections/${it.id}`} className="font-semibold text-prestisa-700 hover:underline">{it.correction_journal_id}</Link></td>
                 <td><span className={statusPill(it.status)}>{it.status}</span></td>
@@ -64,7 +69,7 @@ export default function CorrectionListPage() {
                 <td className="text-xs text-prestisa-500">{it.reviewed_at ? fmtDate(it.reviewed_at) : '—'}</td>
               </tr>
             ))}
-            {items.length === 0 && <tr><td colSpan={10} className="text-center py-10 text-prestisa-400">Tidak ada koreksi.</td></tr>}
+            {!loading && items.length === 0 && <tr><td colSpan={10} className="text-center py-10 text-prestisa-400">Tidak ada koreksi.</td></tr>}
           </tbody>
         </table>
       </div>
