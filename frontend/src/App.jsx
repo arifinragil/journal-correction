@@ -7,6 +7,7 @@ import CorrectionListPage from './pages/CorrectionListPage.jsx';
 import CorrectionFormPage from './pages/CorrectionFormPage.jsx';
 import CorrectionDetailPage from './pages/CorrectionDetailPage.jsx';
 import UserAdminPage from './pages/UserAdminPage.jsx';
+import AgentProposalsPage from './pages/AgentProposalsPage.jsx';
 
 export const AuthCtx = React.createContext(null);
 
@@ -58,6 +59,7 @@ function Shell({ user, onLogout, children }) {
           {link('/', 'Dashboard', '◧')}
           {link('/corrections', 'Corrections', '≡')}
           {(user.role === 'maker' || user.role === 'admin') && link('/corrections/new', 'New Correction', '+')}
+          {link('/agent-proposals', 'Agent Proposals', '🤖')}
           {user.role === 'admin' && link('/users', 'Users', '◔')}
         </nav>
         <div className={`${collapsed ? 'p-2' : 'p-3'} border-t border-prestisa-100`}>
@@ -126,6 +128,8 @@ export default function App() {
           <Route path="/corrections/new" element={<CorrectionFormPage />} />
           <Route path="/corrections/:id" element={<CorrectionDetailPage />} />
           <Route path="/users" element={<UserAdminPage />} />
+          <Route path="/agent-proposals" element={<AgentProposalsPage />} />
+          <Route path="/agent-proposals/:id" element={<AgentProposalsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Shell>
