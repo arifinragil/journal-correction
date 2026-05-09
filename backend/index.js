@@ -91,6 +91,25 @@ function requireAuth(req, res, next) {
   if (req.session && req.session.userId) return next();
   res.status(401).json({ error: 'Unauthorized' });
 }
+
+/**
+ * Token-based auth for service-to-service calls (e.g., n8n webhooks from agent runtime).
+ * Reads X-Agent-Token header, compares constant-time against AGENT_TOKEN env.
+ * Sets req.agentToken=true on success so downstream handlers can branch.
+ */
+function requireAgentToken(req, res, next) {
+  const expected = process.env.AGENT_TOKEN;
+  const got = req.get('X-Agent-Token');
+  if (!expected) return res.status(503).json({ error: 'AGENT_TOKEN not configured on server' });
+  if (!got || got.length !== expected.length) return res.status(401).json({ error: 'Invalid agent token' });
+  // Constant-time comparison
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ got.charCodeAt(i);
+  if (diff !== 0) return res.status(401).json({ error: 'Invalid agent token' });
+  req.agentToken = true;
+  next();
+}
+
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!roles.includes(req.session.role)) return res.status(403).json({ error: 'Forbidden' });
@@ -526,6 +545,89 @@ app.post('/api/users', requireAuth, requireRole('admin'), async (req, res) => {
     if (e.code === '23505') return res.status(409).json({ error: 'Username taken' });
     res.status(500).json({ error: e.message });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Agent Journal Proposals — token-auth endpoint for n8n agent webhook
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/agent-proposals
+ * Auth: X-Agent-Token header (NO session required)
+ * Body: { agent_slug, debit_account, credit_account, amount, memo?, approval_id_at_studio? }
+ * Stores a journal entry proposal from the AI agent system. Human reviews via UI
+ * and converts to a real correction (POST /api/corrections) when ready.
+ */
+app.post('/api/agent-proposals', requireAgentToken, async (req, res) => {
+  const b = req.body || {};
+  const agentSlug = String(b.agent_slug || '').trim();
+  const debit = String(b.debit_account || '').trim();
+  const credit = String(b.credit_account || '').trim();
+  const amount = Number(b.amount);
+  const memo = b.memo ? String(b.memo) : null;
+  const approvalId = b.approval_id_at_studio != null ? Number(b.approval_id_at_studio) : null;
+
+  if (!agentSlug) return res.status(400).json({ error: 'agent_slug required' });
+  if (!debit) return res.status(400).json({ error: 'debit_account required' });
+  if (!credit) return res.status(400).json({ error: 'credit_account required' });
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'amount must be positive number' });
+
+  const { rows } = await pg.query(
+    `INSERT INTO agent_journal_proposals
+       (agent_slug, debit_account, credit_account, amount, memo, approval_id_at_studio, raw_payload)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, status, created_at`,
+    [agentSlug, debit, credit, amount, memo, approvalId, b]
+  );
+  const row = rows[0];
+  res.json({
+    ok: true,
+    id: row.id,
+    status: row.status,
+    created_at: row.created_at,
+    view_url: `https://journal.prestisa.net/agent-proposals/${row.id}`,
+  });
+});
+
+/**
+ * GET /api/agent-proposals?status=pending&limit=50
+ * Auth: session (human reviewer only)
+ */
+app.get('/api/agent-proposals', requireAuth, async (req, res) => {
+  const status = req.query.status ? String(req.query.status) : 'pending';
+  const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+  const { rows } = await pg.query(
+    `SELECT id, agent_slug, debit_account, credit_account, amount, memo,
+            status, approval_id_at_studio, created_at, posted_at, posted_by, rejected_reason
+     FROM agent_journal_proposals
+     WHERE status = $1
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [status, limit]
+  );
+  res.json({ rows, count: rows.length });
+});
+
+/**
+ * POST /api/agent-proposals/:id/decide
+ * Auth: session + role 'maker'|'admin' (human review action)
+ * Body: { decision: 'posted'|'rejected', notes?: string }
+ */
+app.post('/api/agent-proposals/:id/decide', requireAuth, requireRole('maker', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const decision = String(req.body?.decision || '').trim();
+  const notes = req.body?.notes ? String(req.body.notes) : null;
+  if (!['posted', 'rejected'].includes(decision)) return res.status(400).json({ error: 'decision must be posted|rejected' });
+  const { rowCount } = await pg.query(
+    `UPDATE agent_journal_proposals
+       SET status = $1, posted_at = CASE WHEN $1='posted' THEN now() ELSE posted_at END,
+           posted_by = CASE WHEN $1='posted' THEN $2 ELSE posted_by END,
+           rejected_reason = CASE WHEN $1='rejected' THEN $3 ELSE rejected_reason END
+     WHERE id = $4 AND status = 'pending'`,
+    [decision, req.session.userId, notes, id]
+  );
+  if (rowCount === 0) return res.status(404).json({ error: 'proposal not found or already decided' });
+  res.json({ ok: true, id, status: decision });
 });
 
 // Health
