@@ -5,18 +5,22 @@ import api, { fmtIDR, fmtDateOnly } from '../api';
 function StepIndicator({ step }) {
   const steps = ['Lookup Journal', 'Edit Correction', 'Review & Submit'];
   return (
-    <div className="flex items-center gap-2 mb-6">
-      {steps.map((s, i) => (
-        <React.Fragment key={s}>
-          <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${i + 1 === step ? 'bg-prestisa text-white shadow-sm' : i + 1 < step ? 'bg-emerald-100 text-emerald-700' : 'bg-prestisa-50 text-prestisa-500'}`}>
-            <span className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold ${i + 1 === step ? 'bg-white text-prestisa' : i + 1 < step ? 'bg-emerald-500 text-white' : 'bg-white text-prestisa-400'}`}>
-              {i + 1 < step ? '✓' : i + 1}
-            </span>
-            {s}
-          </div>
-          {i < steps.length - 1 && <div className="flex-1 h-px bg-prestisa-100" />}
-        </React.Fragment>
-      ))}
+    <div className="flex items-center gap-2 mb-4 md:mb-6">
+      {steps.map((s, i) => {
+        const active = i + 1 === step;
+        const done = i + 1 < step;
+        return (
+          <React.Fragment key={s}>
+            <div className={`flex items-center gap-2 px-3 md:px-4 py-2 rounded-full text-sm font-medium ${active ? 'bg-prestisa text-white shadow-sm' : done ? 'bg-emerald-100 text-emerald-700' : 'bg-prestisa-50 text-prestisa-500'}`}>
+              <span className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold ${active ? 'bg-white text-prestisa' : done ? 'bg-emerald-500 text-white' : 'bg-white text-prestisa-400'}`}>
+                {done ? '✓' : i + 1}
+              </span>
+              <span className={active ? 'inline' : 'hidden md:inline'}>{s}</span>
+            </div>
+            {i < steps.length - 1 && <div className="flex-1 h-px bg-prestisa-100" />}
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -122,23 +126,24 @@ export default function CorrectionFormPage() {
       {err && <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-lg px-3 py-2">{err}</div>}
 
       {step === 1 && (
-        <div className="card p-8 max-w-4xl">
-          <h2 className="text-xl font-bold text-prestisa-800 mb-1">Cari Journal yang akan dikoreksi</h2>
+        <div className="card p-5 md:p-8 max-w-4xl">
+          <h2 className="text-lg md:text-xl font-bold text-prestisa-800 mb-1">Cari Journal yang akan dikoreksi</h2>
           <p className="text-sm text-prestisa-500 mb-5">Masukkan ID dari sistem POS produksi (journal atau journal entry).</p>
-          <div className="grid grid-cols-12 gap-3 mb-3">
-            <select className="input col-span-3" value={lookupMode} onChange={e => setLookupMode(e.target.value)}>
+          <div className="flex flex-col md:grid md:grid-cols-12 gap-3 mb-3">
+            <select className="input md:col-span-3" value={lookupMode} onChange={e => setLookupMode(e.target.value)}>
               <option value="journal">Journal ID</option>
               <option value="entry">Journal Entry ID</option>
             </select>
             <input
-              className="input col-span-7 text-base"
-              placeholder={lookupMode === 'journal' ? 'cth: 339281 — masukkan Journal ID dari sistem POS' : 'cth: 4102223 — masukkan Journal Entry ID'}
+              className="input md:col-span-7 text-base"
+              inputMode="numeric"
+              placeholder={lookupMode === 'journal' ? 'cth: 339281' : 'cth: 4102223'}
               value={lookupId}
               onChange={e => setLookupId(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && lookupId && !busy && lookup()}
               autoFocus
             />
-            <button onClick={lookup} disabled={!lookupId || busy} className="btn-primary col-span-2">
+            <button onClick={lookup} disabled={!lookupId || busy} className="btn-primary md:col-span-2 justify-center">
               {busy ? 'Mencari…' : 'Lookup →'}
             </button>
           </div>
@@ -150,90 +155,155 @@ export default function CorrectionFormPage() {
 
       {step === 2 && (
         <>
-          <div className="card p-5 bg-prestisa-50/40">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+          <div className="card p-4 md:p-5 bg-prestisa-50/40">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 text-sm">
               <div><div className="label">Journal ID</div><div className="font-mono font-semibold">#{journalInfo.journal_id}</div></div>
               <div><div className="label">Entry ID</div><div className="font-mono">{journalInfo.journal_entry_id}</div></div>
               <div><div className="label">Order Number</div><div className="font-mono">{journalInfo.order_number || '—'}</div></div>
               <div><div className="label">PR Finance ID</div><div>{journalInfo.pr_finance_id || '—'}</div></div>
-              <div className="md:col-span-1"><div className="label">Description</div><div>{journalInfo.journal_description}</div></div>
+              <div className="col-span-2 md:col-span-1"><div className="label">Description</div><div>{journalInfo.journal_description}</div></div>
             </div>
           </div>
 
           <div className="card overflow-hidden">
-            <div className="px-5 py-3 border-b border-prestisa-100 flex items-center justify-between">
+            <div className="px-4 md:px-5 py-3 border-b border-prestisa-100 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
               <h3 className="font-semibold text-prestisa-800">Entries — Edit nilai koreksi</h3>
-              <div className="flex items-center gap-3 text-sm">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs md:text-sm">
                 <span>Original: <span className={origBal.ok ? 'text-emerald-700 font-semibold' : 'text-rose-700 font-semibold'}>{origBal.ok ? 'BALANCED' : 'NOT BALANCED'}</span></span>
                 <span>Corrected: <span className={corrBal.ok ? 'text-emerald-700 font-semibold' : 'text-rose-700 font-semibold'}>{corrBal.ok ? 'BALANCED' : `Δ ${fmtIDR(corrBal.d - corrBal.c)}`}</span></span>
               </div>
             </div>
-            <table className="data">
-              <thead>
-                <tr>
-                  <th colSpan={4} className="text-center bg-slate-100">ORIGINAL (snapshot — read-only)</th>
-                  <th colSpan={6} className="text-center bg-amber-50">CORRECTED (edit di sini)</th>
-                </tr>
-                <tr>
-                  <th>Type</th><th>Account</th><th className="text-right">Amount</th><th>Notes</th>
-                  <th>Type</th><th>Account</th><th className="text-right">Amount</th><th>Notes</th><th>Date</th><th>Co.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((e, i) => (
-                  <tr key={i}>
-                    <td><span className={`pill ${e.original_type.toLowerCase() === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{e.original_type.toUpperCase()}</span></td>
-                    <td className="text-xs"><div className="font-mono">{e.original_account_code}</div><div className="text-prestisa-500">{e.original_account_name}</div></td>
-                    <td className="text-right font-mono">{fmtIDR(e.original_amount)}</td>
-                    <td className="text-xs max-w-[180px] truncate" title={e.original_notes}>{e.original_notes}</td>
 
-                    <td>
-                      <select className="input !py-1 !text-xs" value={e.corrected_type} onChange={ev => updateEntry(i, { corrected_type: ev.target.value })}>
+            {/* Mobile: card per entry */}
+            <div className="md:hidden divide-y divide-prestisa-100">
+              {entries.map((e, i) => (
+                <div key={i} className="p-4 space-y-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-prestisa-400">Entry #{i + 1}</div>
+
+                  <div className="bg-slate-50 rounded-lg p-3 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-prestisa-500 uppercase text-[10px] font-bold">Original</span>
+                      <span className={`pill ${e.original_type.toLowerCase() === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{e.original_type.toUpperCase()}</span>
+                    </div>
+                    <div><span className="text-prestisa-400">Akun: </span><span className="font-mono">{e.original_account_code}</span> · {e.original_account_name}</div>
+                    <div><span className="text-prestisa-400">Amount: </span><span className="font-mono font-semibold">{fmtIDR(e.original_amount)}</span></div>
+                    {e.original_notes && <div><span className="text-prestisa-400">Notes: </span>{e.original_notes}</div>}
+                  </div>
+
+                  <div className="bg-amber-50/60 rounded-lg p-3 space-y-2">
+                    <div className="text-prestisa-700 uppercase text-[10px] font-bold">Corrected</div>
+                    <div>
+                      <label className="label">Type</label>
+                      <select className="input" value={e.corrected_type} onChange={ev => updateEntry(i, { corrected_type: ev.target.value })}>
                         <option>Debit</option><option>Credit</option>
                       </select>
-                    </td>
-                    <td className="relative">
-                      <div className="text-xs"><div className="font-mono">{e.corrected_account_code}</div><div className="text-prestisa-500">{e.corrected_account_name}</div></div>
-                      <input className="input !py-1 !text-xs mt-1" placeholder="cari akun…" value={acctSearch[i] || ''} onChange={ev => searchAccount(i, ev.target.value)} />
+                    </div>
+                    <div className="relative">
+                      <label className="label">Account</label>
+                      <div className="text-xs mb-1"><span className="font-mono">{e.corrected_account_code}</span> · <span className="text-prestisa-500">{e.corrected_account_name}</span></div>
+                      <input className="input" placeholder="cari akun…" value={acctSearch[i] || ''} onChange={ev => searchAccount(i, ev.target.value)} />
                       {acctOptions[i] && acctOptions[i].length > 0 && (
-                        <div className="absolute z-10 mt-1 w-72 bg-white border border-prestisa-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                        <div className="absolute z-10 mt-1 left-0 right-0 bg-white border border-prestisa-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                           {acctOptions[i].map(a => (
-                            <button key={a.id} type="button" onClick={() => pickAccount(i, a)} className="w-full text-left px-3 py-1.5 hover:bg-prestisa-50 text-xs">
-                              <span className="font-mono">{a.code}</span> · {a.name}
+                            <button key={a.id} type="button" onClick={() => pickAccount(i, a)} className="w-full text-left px-3 py-2 hover:bg-prestisa-50 text-sm border-b border-prestisa-50 last:border-0">
+                              <span className="font-mono text-xs">{a.code}</span> · {a.name}
                             </button>
                           ))}
                         </div>
                       )}
-                    </td>
-                    <td><input type="number" className="input !py-1 text-right font-mono" value={e.corrected_amount} onChange={ev => updateEntry(i, { corrected_amount: parseFloat(ev.target.value) || 0 })} /></td>
-                    <td><input className="input !py-1 !text-xs" value={e.corrected_notes} onChange={ev => updateEntry(i, { corrected_notes: ev.target.value })} /></td>
-                    <td><input type="date" className="input !py-1 !text-xs" value={e.corrected_transaction_date || ''} onChange={ev => updateEntry(i, { corrected_transaction_date: ev.target.value })} /></td>
-                    <td><input className="input !py-1 !text-xs w-20" value={e.corrected_company_code || ''} onChange={ev => updateEntry(i, { corrected_company_code: ev.target.value })} /></td>
+                    </div>
+                    <div>
+                      <label className="label">Amount</label>
+                      <input type="number" inputMode="decimal" className="input text-right font-mono" value={e.corrected_amount} onChange={ev => updateEntry(i, { corrected_amount: parseFloat(ev.target.value) || 0 })} />
+                    </div>
+                    <div>
+                      <label className="label">Notes</label>
+                      <input className="input" value={e.corrected_notes} onChange={ev => updateEntry(i, { corrected_notes: ev.target.value })} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="label">Date</label>
+                        <input type="date" className="input" value={e.corrected_transaction_date || ''} onChange={ev => updateEntry(i, { corrected_transaction_date: ev.target.value })} />
+                      </div>
+                      <div>
+                        <label className="label">Co.</label>
+                        <input className="input" value={e.corrected_company_code || ''} onChange={ev => updateEntry(i, { corrected_company_code: ev.target.value })} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: table */}
+            <div className="hidden md:block table-wrap">
+              <table className="data min-w-[1000px]">
+                <thead>
+                  <tr>
+                    <th colSpan={4} className="text-center bg-slate-100">ORIGINAL (snapshot — read-only)</th>
+                    <th colSpan={6} className="text-center bg-amber-50">CORRECTED (edit di sini)</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                  <tr>
+                    <th>Type</th><th>Account</th><th className="text-right">Amount</th><th>Notes</th>
+                    <th>Type</th><th>Account</th><th className="text-right">Amount</th><th>Notes</th><th>Date</th><th>Co.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((e, i) => (
+                    <tr key={i}>
+                      <td><span className={`pill ${e.original_type.toLowerCase() === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{e.original_type.toUpperCase()}</span></td>
+                      <td className="text-xs"><div className="font-mono">{e.original_account_code}</div><div className="text-prestisa-500">{e.original_account_name}</div></td>
+                      <td className="text-right font-mono">{fmtIDR(e.original_amount)}</td>
+                      <td className="text-xs max-w-[180px] truncate" title={e.original_notes}>{e.original_notes}</td>
+
+                      <td>
+                        <select className="input !py-1 !text-xs" value={e.corrected_type} onChange={ev => updateEntry(i, { corrected_type: ev.target.value })}>
+                          <option>Debit</option><option>Credit</option>
+                        </select>
+                      </td>
+                      <td className="relative">
+                        <div className="text-xs"><div className="font-mono">{e.corrected_account_code}</div><div className="text-prestisa-500">{e.corrected_account_name}</div></div>
+                        <input className="input !py-1 !text-xs mt-1" placeholder="cari akun…" value={acctSearch[i] || ''} onChange={ev => searchAccount(i, ev.target.value)} />
+                        {acctOptions[i] && acctOptions[i].length > 0 && (
+                          <div className="absolute z-10 mt-1 w-72 bg-white border border-prestisa-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                            {acctOptions[i].map(a => (
+                              <button key={a.id} type="button" onClick={() => pickAccount(i, a)} className="w-full text-left px-3 py-1.5 hover:bg-prestisa-50 text-xs">
+                                <span className="font-mono">{a.code}</span> · {a.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td><input type="number" className="input !py-1 text-right font-mono" value={e.corrected_amount} onChange={ev => updateEntry(i, { corrected_amount: parseFloat(ev.target.value) || 0 })} /></td>
+                      <td><input className="input !py-1 !text-xs" value={e.corrected_notes} onChange={ev => updateEntry(i, { corrected_notes: ev.target.value })} /></td>
+                      <td><input type="date" className="input !py-1 !text-xs" value={e.corrected_transaction_date || ''} onChange={ev => updateEntry(i, { corrected_transaction_date: ev.target.value })} /></td>
+                      <td><input className="input !py-1 !text-xs w-20" value={e.corrected_company_code || ''} onChange={ev => updateEntry(i, { corrected_company_code: ev.target.value })} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          <div className="card p-5">
+          <div className="card p-4 md:p-5">
             <label className="label">Alasan Koreksi (wajib, min 10 karakter)</label>
             <textarea className="input min-h-[80px]" value={reason} onChange={e => setReason(e.target.value)}
                       placeholder="Jelaskan apa yang salah dan kenapa perlu dikoreksi…" />
             <div className="text-xs text-prestisa-400 mt-1">{reason.length} / 10+ karakter</div>
           </div>
 
-          <div className="flex justify-between">
-            <button onClick={() => setStep(1)} className="btn-ghost">← Kembali</button>
-            <button onClick={() => setStep(3)} disabled={!canProceed3} className="btn-primary">Lanjut Review →</button>
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-2">
+            <button onClick={() => setStep(1)} className="btn-ghost justify-center">← Kembali</button>
+            <button onClick={() => setStep(3)} disabled={!canProceed3} className="btn-primary justify-center">Lanjut Review →</button>
           </div>
         </>
       )}
 
       {step === 3 && (
         <>
-          <div className="card p-6">
+          <div className="card p-4 md:p-6">
             <h3 className="font-bold text-prestisa-800 mb-4">Review & Submit</h3>
-            <div className="grid md:grid-cols-2 gap-6">
+            <div className="grid md:grid-cols-2 gap-4 md:gap-6">
               <div>
                 <div className="label">Source Journal</div>
                 <div className="font-mono text-sm">#{journalInfo.journal_id} · {journalInfo.journal_entry_id}</div>
@@ -267,11 +337,11 @@ export default function CorrectionFormPage() {
             </div>
           </div>
 
-          <div className="flex justify-between">
-            <button onClick={() => setStep(2)} className="btn-ghost">← Edit lagi</button>
-            <div className="flex gap-3">
-              <button onClick={() => submit('draft')} disabled={busy} className="btn-ghost">💾 Save as Draft</button>
-              <button onClick={() => submit('submit')} disabled={busy} className="btn-primary">📤 Submit untuk Approval</button>
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-between gap-2">
+            <button onClick={() => setStep(2)} className="btn-ghost justify-center">← Edit lagi</button>
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+              <button onClick={() => submit('draft')} disabled={busy} className="btn-ghost justify-center">💾 Save as Draft</button>
+              <button onClick={() => submit('submit')} disabled={busy} className="btn-primary justify-center">📤 Submit untuk Approval</button>
             </div>
           </div>
         </>

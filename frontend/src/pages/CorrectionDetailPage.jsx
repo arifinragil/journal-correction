@@ -74,11 +74,11 @@ export default function CorrectionDetailPage() {
           </div>
         </div>
       )}
-      <div className="card p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <h2 className="text-2xl font-extrabold text-prestisa-900 font-mono">{h.correction_journal_id}</h2>
+      <div className="card p-4 md:p-6">
+        <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-3 mb-1 flex-wrap">
+              <h2 className="text-xl md:text-2xl font-extrabold text-prestisa-900 font-mono break-all">{h.correction_journal_id}</h2>
               <span className={statusPill(h.status)}>{h.status}</span>
             </div>
             <div className="text-sm text-prestisa-600 max-w-2xl">{h.reason}</div>
@@ -88,13 +88,15 @@ export default function CorrectionDetailPage() {
               </div>
             )}
           </div>
-          <button onClick={() => nav('/corrections')} className="btn-ghost">← Back to list</button>
+          <button onClick={() => nav('/corrections')} className="btn-ghost whitespace-nowrap">← Back</button>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pt-4 border-t border-prestisa-100">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-sm pt-4 border-t border-prestisa-100">
           <div><div className="label">Maker</div><div>{h.created_by_name}</div><div className="text-xs text-prestisa-500">{fmtDate(h.created_at)}</div></div>
           <div><div className="label">Submitted</div><div>{h.submitted_at ? fmtDate(h.submitted_at) : '—'}</div></div>
           <div><div className="label">Approver</div><div>{h.reviewed_by_name || '—'}</div><div className="text-xs text-prestisa-500">{h.reviewed_at ? fmtDate(h.reviewed_at) : ''}</div></div>
-          <div><div className="label">Source Journal</div><div className="font-mono">#{h.source_journal_id}</div><div className="text-xs text-prestisa-500">{h.source_journal_entry_id}</div></div>
+          <div><div className="label">Source Journal</div><div className="font-mono">#{h.source_journal_id}</div><div className="text-xs text-prestisa-500">{h.source_journal_entry_code || h.source_journal_entry_id}</div></div>
+          <div><div className="label">Order Number</div><div className="font-mono">{h.source_order_number || '—'}</div></div>
+          <div><div className="label">PR Finance ID</div><div className="font-mono">{h.source_pr_finance_id || '—'}</div></div>
         </div>
       </div>
 
@@ -102,7 +104,7 @@ export default function CorrectionDetailPage() {
         <div className="px-5 py-3 border-b border-prestisa-100 font-semibold text-prestisa-800">
           Detail Entries — {entries.length} baris
         </div>
-        <table className="data">
+        <div className="table-wrap"><table className="data min-w-[900px]">
           <thead>
             <tr>
               <th rowSpan={2} className="bg-prestisa-50 text-prestisa-700">Entry ID</th>
@@ -157,7 +159,7 @@ export default function CorrectionDetailPage() {
               </td>
             </tr>
           </tfoot>
-        </table>
+        </table></div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

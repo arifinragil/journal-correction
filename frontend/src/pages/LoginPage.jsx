@@ -47,21 +47,47 @@ export default function LoginPage({ onLoggedIn }) {
           </div>
         </div>
       </div>
-      <div className="flex-1 flex items-center justify-center p-8 bg-prestisa-50/40">
-        <form onSubmit={submit} className="card w-full max-w-md p-8">
-          <img src="/logo.png" className="h-10 mb-1 md:hidden" alt="Prestisa" />
+      <div className="flex-1 flex items-center justify-center p-4 md:p-8 bg-prestisa-50/40">
+        <form onSubmit={submit} className="card w-full max-w-md p-6 md:p-8">
+          <div className="md:hidden text-center mb-5">
+            <img src="/logo.png" className="h-12 mx-auto mb-2" alt="Prestisa" />
+            <div className="text-[11px] uppercase tracking-widest text-prestisa-500 font-bold">Correction Journals</div>
+          </div>
           <h1 className="text-2xl font-bold text-prestisa-800">Masuk</h1>
           <p className="text-sm text-prestisa-500 mb-6">Gunakan akun Finance / Admin Anda.</p>
           {err && <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-lg px-3 py-2 mb-3">{err}</div>}
           <div className="mb-3">
-            <label className="label">Username</label>
-            <input className="input" value={username} onChange={e => setU(e.target.value)} autoFocus />
+            <label className="label" htmlFor="username">Username</label>
+            <input
+              id="username"
+              name="username"
+              type="text"
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className="input"
+              value={username}
+              onChange={e => setU(e.target.value)}
+              autoFocus
+            />
           </div>
           <div className="mb-5">
-            <label className="label">Password</label>
-            <input type="password" className="input" value={password} onChange={e => setP(e.target.value)} />
+            <label className="label" htmlFor="password">Password</label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              className="input"
+              value={password}
+              onChange={e => setP(e.target.value)}
+            />
           </div>
-          <button disabled={busy} className="btn-primary w-full">{busy ? 'Memproses…' : 'Masuk'}</button>
+          <button disabled={busy || !username || !password} className="btn-primary w-full justify-center">{busy ? 'Memproses…' : 'Masuk'}</button>
+          <div className="md:hidden text-[11px] text-prestisa-400 text-center mt-6">
+            Connected With Excellence · journal.prestisa.net
+          </div>
         </form>
       </div>
     </div>

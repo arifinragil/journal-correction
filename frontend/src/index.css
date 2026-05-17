@@ -20,7 +20,11 @@ body { font-family: 'Inter', system-ui, sans-serif; background: #F7F4FB; color: 
 .pill-rejected { @apply pill bg-rose-100 text-rose-800; }
 .diff-cell { @apply !bg-rose-100 !text-rose-800 font-semibold ring-1 ring-inset ring-rose-400; }
 
+.table-wrap { @apply w-full overflow-x-auto -mx-px; }
 table.data { @apply w-full text-sm; }
+@media (max-width: 640px) {
+  .input { @apply text-base; }
+}
 table.data thead th { @apply text-left px-3 py-2 bg-prestisa-50 text-prestisa-700 font-semibold border-b border-prestisa-100 text-xs uppercase tracking-wide; }
 table.data tbody td { @apply px-3 py-2 border-b border-prestisa-50 align-top; }
 table.data tbody tr:hover { @apply bg-prestisa-50/40; }
