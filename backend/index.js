@@ -88,6 +88,12 @@ const upload = multer({
 // Auth
 // ---------------------------------------------------------------------------
 function requireAuth(req, res, next) {
+  const t = req.headers['x-agent-token'];
+  const expected = process.env.AGENT_SERVICE_TOKEN || process.env.AGENT_TOKEN;
+  if (t && expected && t === expected) {
+    req.agent = { source: 'agent-runtime' };
+    return next();
+  }
   if (req.session && req.session.userId) return next();
   res.status(401).json({ error: 'Unauthorized' });
 }
@@ -285,6 +291,22 @@ app.get('/api/corrections/:id', requireAuth, async (req, res) => {
       [id]
     );
     if (hRows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const header = hRows[0];
+    if (header.source_journal_id) {
+      try {
+        const [jRows] = await mysqlPool.query(
+          `SELECT entry_id, order_number, pr_finance_id, description
+           FROM journal WHERE id = ? LIMIT 1`,
+          [header.source_journal_id]
+        );
+        if (jRows.length > 0) {
+          header.source_order_number = jRows[0].order_number;
+          header.source_pr_finance_id = jRows[0].pr_finance_id;
+          header.source_journal_entry_code = jRows[0].entry_id;
+          header.source_journal_description = jRows[0].description;
+        }
+      } catch (_) { /* MySQL lookup failure should not block detail view */ }
+    }
     const { rows: eRows } = await pg.query(
       `SELECT * FROM correction_journal_entries WHERE correction_journal_id = $1 ORDER BY id`,
       [id]
@@ -300,7 +322,7 @@ app.get('/api/corrections/:id', requireAuth, async (req, res) => {
        WHERE cl.correction_journal_id = $1 ORDER BY cl.created_at`,
       [id]
     );
-    res.json({ header: hRows[0], entries: eRows, attachments: aRows, logs: lRows });
+    res.json({ header, entries: eRows, attachments: aRows, logs: lRows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -547,6 +569,39 @@ app.post('/api/users', requireAuth, requireRole('admin'), async (req, res) => {
   }
 });
 
+app.patch('/api/users/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id' });
+  const { role, password, is_active } = req.body || {};
+  const sets = [];
+  const params = [];
+  if (role !== undefined) {
+    if (!['maker', 'approver', 'admin'].includes(role))
+      return res.status(400).json({ error: 'Invalid role' });
+    params.push(role); sets.push(`role = $${params.length}`);
+  }
+  if (password !== undefined && password !== '') {
+    if (typeof password !== 'string' || password.length < 6)
+      return res.status(400).json({ error: 'Password min 6 chars' });
+    const hash = await bcrypt.hash(password, 10);
+    params.push(hash); sets.push(`password_hash = $${params.length}`);
+  }
+  if (is_active !== undefined) {
+    params.push(!!is_active); sets.push(`is_active = $${params.length}`);
+  }
+  if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
+  params.push(id);
+  try {
+    const { rows } = await pg.query(
+      `UPDATE users SET ${sets.join(', ')} WHERE id = $${params.length}
+       RETURNING id, username, full_name, role, is_active, created_at`,
+      params
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---------------------------------------------------------------------------
 // Agent Journal Proposals — token-auth endpoint for n8n agent webhook
 // ---------------------------------------------------------------------------
@@ -613,7 +668,7 @@ app.get('/api/agent-proposals', requireAuth, async (req, res) => {
  * Auth: session + role 'maker'|'admin' (human review action)
  * Body: { decision: 'posted'|'rejected', notes?: string }
  */
-app.post('/api/agent-proposals/:id/decide', requireAuth, requireRole('maker', 'admin'), async (req, res) => {
+app.post('/api/agent-proposals/:id/decide', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const decision = String(req.body?.decision || '').trim();
   const notes = req.body?.notes ? String(req.body.notes) : null;
