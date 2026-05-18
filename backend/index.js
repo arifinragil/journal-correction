@@ -328,11 +328,22 @@ app.get('/api/corrections/:id', requireAuth, async (req, res) => {
 
 app.post('/api/corrections', requireAuth, requireRole('maker', 'admin'), async (req, res) => {
   const { reason, source_journal_id, source_journal_entry_id, entries } = req.body || {};
+  const mode = String(req.body?.mode || 'CORRECTION').trim().toUpperCase();
+  if (!['CORRECTION', 'ADD_ENTRIES'].includes(mode)) return res.status(400).json({ error: 'mode must be CORRECTION|ADD_ENTRIES' });
   if (!reason || reason.trim().length < 10) return res.status(400).json({ error: 'Reason required (min 10 chars)' });
   if (!Array.isArray(entries) || entries.length < 2) return res.status(400).json({ error: 'At least 2 entries required' });
 
-  const orig = isBalanced(entries, 'original_type', 'original_amount');
-  if (!orig.ok) return res.status(400).json({ error: `Original entries not balanced (debit=${orig.debit}, credit=${orig.credit})` });
+  const sourceJournalId = Number.isInteger(source_journal_id) ? source_journal_id : parseInt(source_journal_id, 10);
+  if (mode === 'ADD_ENTRIES') {
+    if (!Number.isInteger(sourceJournalId) || sourceJournalId <= 0) {
+      return res.status(400).json({ error: 'source_journal_id required for ADD_ENTRIES' });
+    }
+  }
+
+  if (mode === 'CORRECTION') {
+    const orig = isBalanced(entries, 'original_type', 'original_amount');
+    if (!orig.ok) return res.status(400).json({ error: `Original entries not balanced (debit=${orig.debit}, credit=${orig.credit})` });
+  }
   const corr = isBalanced(entries, 'corrected_type', 'corrected_amount');
   if (!corr.ok) return res.status(400).json({ error: `Corrected entries not balanced (debit=${corr.debit}, credit=${corr.credit})` });
 
@@ -342,12 +353,20 @@ app.post('/api/corrections', requireAuth, requireRole('maker', 'admin'), async (
     const cjId = await generateCorrectionId(client);
     const { rows: ins } = await client.query(
       `INSERT INTO correction_journals
-       (correction_journal_id, status, reason, source_journal_id, source_journal_entry_id, created_by)
-       VALUES ($1, 'DRAFT', $2, $3, $4, $5) RETURNING id`,
-      [cjId, reason.trim(), source_journal_id || null, source_journal_entry_id || null, req.session.userId]
+       (correction_journal_id, status, mode, reason, source_journal_id, source_journal_entry_id, created_by)
+       VALUES ($1, 'DRAFT', $2, $3, $4, $5, $6) RETURNING id`,
+      [
+        cjId,
+        mode,
+        reason.trim(),
+        Number.isInteger(sourceJournalId) ? sourceJournalId : null,
+        mode === 'ADD_ENTRIES' ? null : (source_journal_entry_id || null),
+        req.session.userId,
+      ]
     );
     const newId = ins[0].id;
     for (const e of entries) {
+      const isAdd = mode === 'ADD_ENTRIES';
       await client.query(
         `INSERT INTO correction_journal_entries
          (correction_journal_id, source_journal_entry_id,
@@ -357,9 +376,16 @@ app.post('/api/corrections', requireAuth, requireRole('maker', 'admin'), async (
           corrected_notes, corrected_transaction_date, corrected_company_code)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
         [
-          newId, e.source_journal_entry_id,
-          e.original_type, e.original_amount, e.original_account_id, e.original_account_code, e.original_account_name,
-          e.original_notes, e.original_transaction_date, e.original_company_code,
+          newId,
+          isAdd ? null : e.source_journal_entry_id,
+          isAdd ? null : e.original_type,
+          isAdd ? null : e.original_amount,
+          isAdd ? null : e.original_account_id,
+          isAdd ? null : e.original_account_code,
+          isAdd ? null : e.original_account_name,
+          isAdd ? null : e.original_notes,
+          isAdd ? null : e.original_transaction_date,
+          isAdd ? null : e.original_company_code,
           e.corrected_type, e.corrected_amount, e.corrected_account_id, e.corrected_account_code, e.corrected_account_name,
           e.corrected_notes, e.corrected_transaction_date, e.corrected_company_code,
         ]
@@ -368,10 +394,10 @@ app.post('/api/corrections', requireAuth, requireRole('maker', 'admin'), async (
     await client.query(
       `INSERT INTO correction_logs (correction_journal_id, action, actor_user_id, payload_json)
        VALUES ($1, 'CREATED', $2, $3)`,
-      [newId, req.session.userId, JSON.stringify({ entry_count: entries.length })]
+      [newId, req.session.userId, JSON.stringify({ entry_count: entries.length, mode })]
     );
     await client.query('COMMIT');
-    res.json({ id: newId, correction_journal_id: cjId, status: 'DRAFT' });
+    res.json({ id: newId, correction_journal_id: cjId, status: 'DRAFT', mode });
   } catch (e) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: e.message });
@@ -410,13 +436,21 @@ app.post('/api/corrections/:id/submit', requireAuth, async (req, res) => {
 });
 
 async function pushCorrectionToMySQL(client, correctionId) {
-  // Read all corrected entries for this correction
+  // Read parent correction (mode + source journal) and the entries
+  const { rows: cjRows } = await client.query(
+    `SELECT mode, source_journal_id FROM correction_journals WHERE id = $1`,
+    [correctionId]
+  );
+  if (cjRows.length === 0) throw new Error('correction not found');
+  const { mode, source_journal_id } = cjRows[0];
+
   const { rows: entries } = await client.query(
     `SELECT source_journal_entry_id,
             corrected_type, corrected_amount, corrected_account_id,
             corrected_notes, corrected_transaction_date, corrected_company_code
        FROM correction_journal_entries
-      WHERE correction_journal_id = $1`,
+      WHERE correction_journal_id = $1
+      ORDER BY id`,
     [correctionId]
   );
   if (entries.length === 0) throw new Error('No entries to sync');
@@ -424,24 +458,55 @@ async function pushCorrectionToMySQL(client, correctionId) {
   const conn = await mysqlPool.getConnection();
   try {
     await conn.beginTransaction();
-    for (const e of entries) {
-      const [result] = await conn.query(
-        `UPDATE journal_entries
-            SET type = ?, amount = ?, account_id = ?, notes = ?,
-                transaction_date = ?, company_code = ?, updated_at = NOW()
-          WHERE id = ?`,
-        [
-          e.corrected_type,
-          e.corrected_amount,
-          e.corrected_account_id,
-          e.corrected_notes,
-          e.corrected_transaction_date,
-          e.corrected_company_code,
-          e.source_journal_entry_id,
-        ]
+
+    if (mode === 'ADD_ENTRIES') {
+      if (!source_journal_id) throw new Error('ADD_ENTRIES requires source_journal_id');
+      // Verify parent journal exists and not deleted
+      const [parent] = await conn.query(
+        `SELECT id, transaction_date, company_code FROM journal WHERE id = ? AND deleted_at IS NULL`,
+        [source_journal_id]
       );
-      if (result.affectedRows !== 1) {
-        throw new Error(`journal_entries id=${e.source_journal_entry_id} not found or not updated`);
+      if (parent.length === 0) throw new Error(`MySQL journal id=${source_journal_id} not found or deleted`);
+      const fallbackDate = parent[0].transaction_date;
+      const fallbackCompany = parent[0].company_code;
+
+      for (const e of entries) {
+        await conn.query(
+          `INSERT INTO journal_entries
+             (journal_id, type, amount, account_id, notes, transaction_date, company_code, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            source_journal_id,
+            e.corrected_type,
+            e.corrected_amount,
+            e.corrected_account_id,
+            e.corrected_notes,
+            e.corrected_transaction_date || fallbackDate,
+            e.corrected_company_code || fallbackCompany,
+          ]
+        );
+      }
+    } else {
+      // CORRECTION mode — UPDATE existing entries by source_journal_entry_id
+      for (const e of entries) {
+        const [result] = await conn.query(
+          `UPDATE journal_entries
+              SET type = ?, amount = ?, account_id = ?, notes = ?,
+                  transaction_date = ?, company_code = ?, updated_at = NOW()
+            WHERE id = ?`,
+          [
+            e.corrected_type,
+            e.corrected_amount,
+            e.corrected_account_id,
+            e.corrected_notes,
+            e.corrected_transaction_date,
+            e.corrected_company_code,
+            e.source_journal_entry_id,
+          ]
+        );
+        if (result.affectedRows !== 1) {
+          throw new Error(`journal_entries id=${e.source_journal_entry_id} not found or not updated`);
+        }
       }
     }
     await conn.commit();
