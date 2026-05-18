@@ -675,14 +675,98 @@ app.post('/api/agent-proposals/:id/decide', requireAuth, requireRole('maker', 'a
   if (!['posted', 'rejected'].includes(decision)) return res.status(400).json({ error: 'decision must be posted|rejected' });
   const { rowCount } = await pg.query(
     `UPDATE agent_journal_proposals
-       SET status = $1, posted_at = CASE WHEN $1='posted' THEN now() ELSE posted_at END,
-           posted_by = CASE WHEN $1='posted' THEN $2 ELSE posted_by END,
-           rejected_reason = CASE WHEN $1='rejected' THEN $3 ELSE rejected_reason END
-     WHERE id = $4 AND status = 'pending'`,
+       SET status = $1::text,
+           posted_at = CASE WHEN $1::text='posted' THEN now() ELSE posted_at END,
+           posted_by = CASE WHEN $1::text='posted' THEN $2::int ELSE posted_by END,
+           rejected_reason = CASE WHEN $1::text='rejected' THEN $3::text ELSE rejected_reason END
+     WHERE id = $4::int AND status = 'pending'`,
     [decision, req.session.userId, notes, id]
   );
   if (rowCount === 0) return res.status(404).json({ error: 'proposal not found or already decided' });
   res.json({ ok: true, id, status: decision });
+});
+
+// ---------------------------------------------------------------------------
+// Journal Deletions
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/journal-deletions/search?q=<term>
+ * Single-input search across MySQL journal.id, journal_entries.id (numeric),
+ * journal.entry_id, journal.order_number (string). Returns matching active journals
+ * with their entries and correction-reference flag.
+ */
+app.get('/api/journal-deletions/search', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ results: [] });
+  try {
+    const isNumeric = /^\d+$/.test(q);
+    let journalIds = new Set();
+
+    if (isNumeric) {
+      const n = parseInt(q, 10);
+      const [byJournal] = await mysqlPool.query(
+        `SELECT id FROM journal WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
+        [n]
+      );
+      byJournal.forEach(r => journalIds.add(r.id));
+      const [byEntry] = await mysqlPool.query(
+        `SELECT journal_id FROM journal_entries WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
+        [n]
+      );
+      byEntry.forEach(r => journalIds.add(r.journal_id));
+    } else {
+      const like = '%' + q + '%';
+      const [rows] = await mysqlPool.query(
+        `SELECT id FROM journal
+          WHERE deleted_at IS NULL
+            AND (entry_id LIKE ? OR order_number LIKE ?)
+          ORDER BY id DESC LIMIT 20`,
+        [like, like]
+      );
+      rows.forEach(r => journalIds.add(r.id));
+    }
+
+    const ids = [...journalIds];
+    if (ids.length === 0) return res.json({ results: [] });
+
+    const [journals] = await mysqlPool.query(
+      `SELECT id, entry_id, order_number, pr_finance_id, description,
+              transaction_date, company_code
+         FROM journal WHERE id IN (?) AND deleted_at IS NULL`,
+      [ids]
+    );
+    const [entries] = await mysqlPool.query(
+      `SELECT je.id, je.journal_id, je.type, je.amount, je.account_id, je.notes,
+              a.account_number AS account_code, a.name AS account_name
+         FROM journal_entries je
+         LEFT JOIN accounts a ON a.id = je.account_id
+        WHERE je.journal_id IN (?) AND je.deleted_at IS NULL
+        ORDER BY je.id`,
+      [ids]
+    );
+    const entriesByJournal = new Map();
+    entries.forEach(e => {
+      if (!entriesByJournal.has(e.journal_id)) entriesByJournal.set(e.journal_id, []);
+      entriesByJournal.get(e.journal_id).push(e);
+    });
+
+    const { rows: refRows } = await pg.query(
+      `SELECT DISTINCT source_journal_id FROM correction_journals
+        WHERE source_journal_id = ANY($1::int[])`,
+      [ids]
+    );
+    const refSet = new Set(refRows.map(r => r.source_journal_id));
+
+    const results = journals.map(j => ({
+      journal: j,
+      entries: entriesByJournal.get(j.id) || [],
+      has_correction_reference: refSet.has(j.id),
+    }));
+    res.json({ results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Health
