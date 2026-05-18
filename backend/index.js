@@ -1016,6 +1016,41 @@ app.post('/api/journal-deletions/:id/approve', requireAuth, requireRole('approve
   }
 });
 
+/**
+ * POST /api/journal-deletions/:id/reject
+ * Body: { notes?: string }
+ */
+app.post('/api/journal-deletions/:id/reject', requireAuth, requireRole('approver', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const notes = req.body?.notes ? String(req.body.notes) : null;
+  const decider = req.session.userId;
+  try {
+    const { rows } = await pg.query(
+      `SELECT status, created_by FROM journal_deletion_requests WHERE id = $1::int FOR UPDATE`,
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (rows[0].status !== 'PENDING') return res.status(409).json({ error: 'Already decided' });
+    if (rows[0].created_by === decider) return res.status(403).json({ error: 'Cannot decide own request' });
+
+    await pg.query(
+      `UPDATE journal_deletion_requests
+          SET status = 'REJECTED', decided_by = $2::int, decided_at = NOW(),
+              decision_notes = $3::text
+        WHERE id = $1::int`,
+      [id, decider, notes]
+    );
+    await pg.query(
+      `INSERT INTO journal_deletion_audit_logs (request_id, action, actor_id, details)
+       VALUES ($1, 'REJECT', $2, $3::jsonb)`,
+      [id, decider, JSON.stringify({ notes })]
+    );
+    res.json({ ok: true, id, status: 'REJECTED' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Health
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
