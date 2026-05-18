@@ -876,6 +876,55 @@ app.post('/api/journal-deletions', requireAuth, requireRole('maker', 'approver',
   }
 });
 
+/**
+ * GET /api/journal-deletions?status=&limit=
+ */
+app.get('/api/journal-deletions', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const status = req.query.status ? String(req.query.status).toUpperCase() : null;
+  const limit = Math.min(parseInt(req.query.limit || '100', 10) || 100, 500);
+  const params = [];
+  let where = '';
+  if (status && ['PENDING', 'APPROVED', 'REJECTED'].includes(status)) {
+    params.push(status);
+    where = `WHERE r.status = $1::text`;
+  }
+  params.push(limit);
+  const { rows } = await pg.query(
+    `SELECT r.id, r.scope, r.mysql_journal_id, r.mysql_entry_ids,
+            r.has_correction_reference, r.reason, r.status,
+            r.created_at, r.decided_at, r.executed_at,
+            r.snapshot->'journal'->>'entry_id'   AS journal_entry_id,
+            r.snapshot->'journal'->>'order_number' AS order_number,
+            u.full_name AS created_by_name,
+            d.full_name AS decided_by_name
+       FROM journal_deletion_requests r
+       JOIN users u ON u.id = r.created_by
+       LEFT JOIN users d ON d.id = r.decided_by
+       ${where}
+       ORDER BY r.created_at DESC
+       LIMIT $${params.length}::int`,
+    params
+  );
+  res.json({ rows });
+});
+
+/**
+ * GET /api/journal-deletions/:id
+ */
+app.get('/api/journal-deletions/:id', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { rows } = await pg.query(
+    `SELECT r.*, u.full_name AS created_by_name, d.full_name AS decided_by_name
+       FROM journal_deletion_requests r
+       JOIN users u ON u.id = r.created_by
+       LEFT JOIN users d ON d.id = r.decided_by
+      WHERE r.id = $1::int`,
+    [id]
+  );
+  if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+  res.json(rows[0]);
+});
+
 // Health
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
