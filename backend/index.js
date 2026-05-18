@@ -769,6 +769,113 @@ app.get('/api/journal-deletions/search', requireAuth, requireRole('maker', 'appr
   }
 });
 
+/**
+ * Builds the snapshot, balance_after, and has_correction_reference for a request.
+ * Throws Error with .status if validation fails.
+ */
+async function buildDeletionPayload({ scope, mysql_journal_id, mysql_entry_ids }) {
+  const [journals] = await mysqlPool.query(
+    `SELECT id, entry_id, order_number, pr_finance_id, description,
+            transaction_date, company_code
+       FROM journal WHERE id = ? AND deleted_at IS NULL`,
+    [mysql_journal_id]
+  );
+  if (journals.length === 0) {
+    const e = new Error('MySQL journal not found or already deleted');
+    e.status = 404; throw e;
+  }
+  const [entries] = await mysqlPool.query(
+    `SELECT je.id, je.type, je.amount, je.account_id, je.notes,
+            a.account_number AS account_code, a.name AS account_name
+       FROM journal_entries je
+       LEFT JOIN accounts a ON a.id = je.account_id
+      WHERE je.journal_id = ? AND je.deleted_at IS NULL
+      ORDER BY je.id`,
+    [mysql_journal_id]
+  );
+
+  let balance_after = null;
+  if (scope === 'ENTRY') {
+    const idSet = new Set(mysql_entry_ids);
+    for (const id of idSet) {
+      if (!entries.find(e => e.id === id)) {
+        const err = new Error(`Entry ${id} does not belong to journal ${mysql_journal_id} or is already deleted`);
+        err.status = 400; throw err;
+      }
+    }
+    let debit = 0, credit = 0;
+    for (const e of entries) {
+      if (idSet.has(e.id)) continue;
+      const amt = Number(e.amount);
+      if (e.type === 'DEBIT') debit += amt; else if (e.type === 'CREDIT') credit += amt;
+    }
+    balance_after = {
+      debit: debit.toFixed(2),
+      credit: credit.toFixed(2),
+      imbalance: (debit - credit).toFixed(2),
+    };
+  }
+
+  const { rows: refRows } = await pg.query(
+    `SELECT 1 FROM correction_journals WHERE source_journal_id = $1 LIMIT 1`,
+    [mysql_journal_id]
+  );
+  const has_correction_reference = refRows.length > 0;
+
+  const snapshot = {
+    journal: { ...journals[0], captured_at: new Date().toISOString() },
+    entries,
+  };
+  return { snapshot, balance_after, has_correction_reference };
+}
+
+/**
+ * POST /api/journal-deletions
+ * Body: { scope, mysql_journal_id, mysql_entry_ids?, reason }
+ */
+app.post('/api/journal-deletions', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const scope = String(req.body?.scope || '').trim();
+  const mysql_journal_id = parseInt(req.body?.mysql_journal_id, 10);
+  const reason = String(req.body?.reason || '').trim();
+  const entry_ids_raw = Array.isArray(req.body?.mysql_entry_ids) ? req.body.mysql_entry_ids : null;
+
+  if (!['JOURNAL', 'ENTRY'].includes(scope)) return res.status(400).json({ error: 'scope must be JOURNAL|ENTRY' });
+  if (!Number.isInteger(mysql_journal_id) || mysql_journal_id <= 0) return res.status(400).json({ error: 'mysql_journal_id required' });
+  if (!reason) return res.status(400).json({ error: 'reason required' });
+
+  let mysql_entry_ids = null;
+  if (scope === 'ENTRY') {
+    if (!entry_ids_raw || entry_ids_raw.length === 0) return res.status(400).json({ error: 'mysql_entry_ids required for scope=ENTRY' });
+    mysql_entry_ids = entry_ids_raw.map(x => parseInt(x, 10)).filter(Number.isInteger);
+    if (mysql_entry_ids.length === 0) return res.status(400).json({ error: 'mysql_entry_ids invalid' });
+  }
+
+  try {
+    const { snapshot, balance_after, has_correction_reference } =
+      await buildDeletionPayload({ scope, mysql_journal_id, mysql_entry_ids });
+
+    const { rows } = await pg.query(
+      `INSERT INTO journal_deletion_requests
+         (scope, mysql_journal_id, mysql_entry_ids, snapshot, balance_after,
+          has_correction_reference, reason, created_by)
+       VALUES ($1::text, $2::int, $3::int[], $4::jsonb, $5::jsonb, $6::bool, $7::text, $8::int)
+       RETURNING *`,
+      [scope, mysql_journal_id, mysql_entry_ids, JSON.stringify(snapshot),
+       balance_after ? JSON.stringify(balance_after) : null,
+       has_correction_reference, reason, req.session.userId]
+    );
+    const request = rows[0];
+    await pg.query(
+      `INSERT INTO journal_deletion_audit_logs (request_id, action, actor_id, details)
+       VALUES ($1, 'CREATE', $2, $3::jsonb)`,
+      [request.id, req.session.userId, JSON.stringify({ scope, mysql_journal_id, mysql_entry_ids })]
+    );
+    res.status(201).json(request);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 // Health
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
