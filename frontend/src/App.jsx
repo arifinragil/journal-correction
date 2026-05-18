@@ -8,6 +8,9 @@ import CorrectionFormPage from './pages/CorrectionFormPage.jsx';
 import CorrectionDetailPage from './pages/CorrectionDetailPage.jsx';
 import UserAdminPage from './pages/UserAdminPage.jsx';
 import AgentProposalsPage from './pages/AgentProposalsPage.jsx';
+import JournalDeletionsPage from './pages/JournalDeletionsPage.jsx';
+import JournalDeletionNewPage from './pages/JournalDeletionNewPage.jsx';
+import JournalDeletionDetailPage from './pages/JournalDeletionDetailPage.jsx';
 
 export const AuthCtx = React.createContext(null);
 
@@ -90,6 +93,7 @@ function Shell({ user, onLogout, children }) {
           {link('/corrections', 'Corrections', '≡')}
           {(user.role === 'maker' || user.role === 'admin') && link('/corrections/new', 'New Correction', '+')}
           {link('/agent-proposals', 'Agent Proposals', '🤖')}
+          {link('/journal-deletions', 'Hapus Journal', '🗑')}
           {user.role === 'admin' && link('/users', 'Users', '◔')}
         </nav>
         <div className={`p-3 ${collapsed ? 'md:p-2' : ''} border-t border-prestisa-100`}>
@@ -167,6 +171,9 @@ export default function App() {
           <Route path="/users" element={<UserAdminPage />} />
           <Route path="/agent-proposals" element={<AgentProposalsPage />} />
           <Route path="/agent-proposals/:id" element={<AgentProposalsPage />} />
+          <Route path="/journal-deletions" element={<JournalDeletionsPage />} />
+          <Route path="/journal-deletions/new" element={<JournalDeletionNewPage />} />
+          <Route path="/journal-deletions/:id" element={<JournalDeletionDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Shell>
