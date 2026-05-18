@@ -925,6 +925,97 @@ app.get('/api/journal-deletions/:id', requireAuth, requireRole('maker', 'approve
   res.json(rows[0]);
 });
 
+/**
+ * POST /api/journal-deletions/:id/approve
+ * Body: { notes?: string }
+ * Cross-DB sequence: Postgres BEGIN → MySQL BEGIN → MySQL UPDATE → MySQL COMMIT → Postgres UPDATE → Postgres COMMIT
+ */
+app.post('/api/journal-deletions/:id/approve', requireAuth, requireRole('approver', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const notes = req.body?.notes ? String(req.body.notes) : null;
+  const decider = req.session.userId;
+
+  const pgClient = await pg.connect();
+  let mysqlConn = null;
+  try {
+    await pgClient.query('BEGIN');
+    const { rows } = await pgClient.query(
+      `SELECT id, scope, mysql_journal_id, mysql_entry_ids, status, created_by
+         FROM journal_deletion_requests
+        WHERE id = $1::int FOR UPDATE`,
+      [id]
+    );
+    if (rows.length === 0) { await pgClient.query('ROLLBACK'); return res.status(404).json({ error: 'Not found' }); }
+    const r = rows[0];
+    if (r.status !== 'PENDING') { await pgClient.query('ROLLBACK'); return res.status(409).json({ error: 'Already decided' }); }
+    if (r.created_by === decider) { await pgClient.query('ROLLBACK'); return res.status(403).json({ error: 'Cannot approve own request (separation of duty)' }); }
+
+    mysqlConn = await mysqlPool.getConnection();
+    await mysqlConn.beginTransaction();
+    let affected = 0;
+    if (r.scope === 'JOURNAL') {
+      const [j] = await mysqlConn.query(
+        `UPDATE journal SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL`,
+        [r.mysql_journal_id]
+      );
+      affected = j.affectedRows;
+      await mysqlConn.query(
+        `UPDATE journal_entries SET deleted_at = NOW()
+          WHERE journal_id = ? AND deleted_at IS NULL`,
+        [r.mysql_journal_id]
+      );
+    } else {
+      const [e] = await mysqlConn.query(
+        `UPDATE journal_entries SET deleted_at = NOW()
+          WHERE id IN (?) AND deleted_at IS NULL`,
+        [r.mysql_entry_ids]
+      );
+      affected = e.affectedRows;
+    }
+    if (affected === 0) {
+      await mysqlConn.rollback();
+      await pgClient.query('ROLLBACK');
+      await pg.query(
+        `INSERT INTO journal_deletion_audit_logs (request_id, action, actor_id, details)
+         VALUES ($1, 'EXECUTE_FAILED', $2, $3::jsonb)`,
+        [id, decider, JSON.stringify({ reason: 'no rows affected in MySQL' })]
+      );
+      return res.status(409).json({ error: 'Target already deleted or missing in MySQL' });
+    }
+    await mysqlConn.commit();
+
+    await pgClient.query(
+      `UPDATE journal_deletion_requests
+          SET status = 'APPROVED', decided_by = $2::int, decided_at = NOW(),
+              decision_notes = $3::text, executed_at = NOW()
+        WHERE id = $1::int`,
+      [id, decider, notes]
+    );
+    await pgClient.query(
+      `INSERT INTO journal_deletion_audit_logs (request_id, action, actor_id, details)
+       VALUES ($1, 'APPROVE', $2, $3::jsonb),
+              ($1, 'EXECUTE', $2, $3::jsonb)`,
+      [id, decider, JSON.stringify({ notes, affected })]
+    );
+    await pgClient.query('COMMIT');
+    res.json({ ok: true, id, status: 'APPROVED', affected });
+  } catch (err) {
+    try { if (mysqlConn) await mysqlConn.rollback(); } catch (_) {}
+    try { await pgClient.query('ROLLBACK'); } catch (_) {}
+    try {
+      await pg.query(
+        `INSERT INTO journal_deletion_audit_logs (request_id, action, actor_id, details)
+         VALUES ($1, 'EXECUTE_FAILED', $2, $3::jsonb)`,
+        [id, decider, JSON.stringify({ error: err.message })]
+      );
+    } catch (_) {}
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (mysqlConn) mysqlConn.release();
+    pgClient.release();
+  }
+});
+
 // Health
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
