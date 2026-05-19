@@ -11,6 +11,9 @@ import AgentProposalsPage from './pages/AgentProposalsPage.jsx';
 import JournalDeletionsPage from './pages/JournalDeletionsPage.jsx';
 import JournalDeletionNewPage from './pages/JournalDeletionNewPage.jsx';
 import JournalDeletionDetailPage from './pages/JournalDeletionDetailPage.jsx';
+import IrisStatementsPage from './pages/IrisStatementsPage.jsx';
+import IrisStatementFormPage from './pages/IrisStatementFormPage.jsx';
+import IrisStatementBulkUploadPage from './pages/IrisStatementBulkUploadPage.jsx';
 
 export const AuthCtx = React.createContext(null);
 
@@ -94,6 +97,7 @@ function Shell({ user, onLogout, children }) {
           {(user.role === 'maker' || user.role === 'admin') && link('/corrections/new', 'New Correction', '+')}
           {link('/agent-proposals', 'Agent Proposals', '🤖')}
           {link('/journal-deletions', 'Hapus Journal', '🗑')}
+          {link('/iris-statements', 'Account Statements', '💳')}
           {user.role === 'admin' && link('/users', 'Users', '◔')}
         </nav>
         <div className={`p-3 ${collapsed ? 'md:p-2' : ''} border-t border-prestisa-100`}>
@@ -174,6 +178,10 @@ export default function App() {
           <Route path="/journal-deletions" element={<JournalDeletionsPage />} />
           <Route path="/journal-deletions/new" element={<JournalDeletionNewPage />} />
           <Route path="/journal-deletions/:id" element={<JournalDeletionDetailPage />} />
+          <Route path="/iris-statements" element={<IrisStatementsPage />} />
+          <Route path="/iris-statements/new" element={<IrisStatementFormPage />} />
+          <Route path="/iris-statements/bulk-upload" element={<IrisStatementBulkUploadPage />} />
+          <Route path="/iris-statements/:id" element={<IrisStatementFormPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Shell>

@@ -1116,6 +1116,233 @@ app.post('/api/journal-deletions/:id/reject', requireAuth, requireRole('approver
   }
 });
 
+// ============================================================================
+// iris_account_statements: view / add / edit / delete + bulk Excel upload
+// ============================================================================
+const XLSX = require('xlsx');
+
+const uploadXlsx = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = /\.(xlsx|xls|csv)$/i.test(file.originalname);
+    cb(ok ? null : new Error('File harus .xlsx / .xls / .csv'), ok);
+  },
+});
+
+function parseStatementRow(raw) {
+  const account_id = parseInt(raw.account_id ?? raw.AccountId ?? raw['Account ID'], 10);
+  const description = String(raw.description ?? raw.Description ?? '').trim();
+  const received = Number(raw.received ?? raw.Received ?? 0) || 0;
+  const spent = Number(raw.spent ?? raw.Spent ?? 0) || 0;
+  const reconciledRaw = raw.reconciled ?? raw.Reconciled ?? 0;
+  const reconciled = (reconciledRaw === 1 || reconciledRaw === '1' || reconciledRaw === true ||
+    String(reconciledRaw).toLowerCase() === 'yes' || String(reconciledRaw).toLowerCase() === 'true') ? 1 : 0;
+  const closeRaw = raw.close_balance ?? raw['Close Balance'] ?? raw.closeBalance;
+  const close_balance = (closeRaw === '' || closeRaw == null) ? null : Number(closeRaw);
+
+  let td = raw.transaction_date ?? raw['Transaction Date'] ?? raw.transactionDate ?? null;
+  if (td instanceof Date) td = td.toISOString().slice(0, 19).replace('T', ' ');
+  else if (typeof td === 'number') {
+    const d = XLSX.SSF.parse_date_code(td);
+    if (d) td = `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')} ${String(d.H||0).padStart(2,'0')}:${String(d.M||0).padStart(2,'0')}:${String(d.S||0).padStart(2,'0')}`;
+  } else if (typeof td === 'string') {
+    td = td.trim() || null;
+  }
+  return { account_id, description, received, spent, reconciled, close_balance, transaction_date: td };
+}
+
+function validateStatement(row, idx) {
+  const errs = [];
+  if (!Number.isInteger(row.account_id) || row.account_id <= 0) errs.push('account_id invalid');
+  if (!(row.received >= 0)) errs.push('received invalid');
+  if (!(row.spent >= 0)) errs.push('spent invalid');
+  if (row.received === 0 && row.spent === 0) errs.push('received atau spent harus > 0');
+  if (row.received > 0 && row.spent > 0) errs.push('hanya salah satu received atau spent yang boleh > 0');
+  if (!row.transaction_date) errs.push('transaction_date wajib diisi');
+  return errs.length ? { row: idx, errors: errs } : null;
+}
+
+// Lookup helper: list accounts (for dropdown)
+app.get('/api/iris-accounts', requireAuth, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const params = [];
+    let where = 'deleted_at IS NULL';
+    if (q) { where += ' AND (name LIKE ? OR CAST(id AS CHAR) = ?)'; params.push('%' + q + '%', q); }
+    const [rows] = await mysqlPool.query(
+      `SELECT id, name, type, category FROM accounts WHERE ${where} ORDER BY name LIMIT 200`, params
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// List with filters
+app.get('/api/iris-statements', requireAuth, async (req, res) => {
+  try {
+    const { account_id, from, to, q, reconciled } = req.query;
+    const params = [];
+    const where = ['s.deleted_at IS NULL'];
+    if (account_id) { where.push('s.account_id = ?'); params.push(parseInt(account_id, 10)); }
+    if (from) { where.push('s.transaction_date >= ?'); params.push(from); }
+    if (to) { where.push('s.transaction_date <= ?'); params.push(to + ' 23:59:59'); }
+    if (q) { where.push('s.description LIKE ?'); params.push('%' + q + '%'); }
+    if (reconciled === '0' || reconciled === '1') { where.push('s.reconciled = ?'); params.push(parseInt(reconciled, 10)); }
+    const limit = Math.min(parseInt(req.query.limit || '100', 10), 500);
+    const offset = parseInt(req.query.offset || '0', 10);
+
+    const [rows] = await mysqlPool.query(
+      `SELECT s.id, s.account_id, a.name AS account_name, s.description, s.received, s.spent,
+              s.reconciled, s.close_balance, s.transaction_date, s.created_at, s.updated_at
+         FROM iris_account_statements s
+         LEFT JOIN accounts a ON a.id = s.account_id
+        WHERE ${where.join(' AND ')}
+        ORDER BY s.transaction_date DESC, s.id DESC
+        LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    const [[cnt]] = await mysqlPool.query(
+      `SELECT COUNT(*) AS total FROM iris_account_statements s WHERE ${where.join(' AND ')}`, params
+    );
+    res.json({ items: rows, total: cnt.total, limit, offset });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Detail
+app.get('/api/iris-statements/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const [rows] = await mysqlPool.query(
+      `SELECT s.*, a.name AS account_name
+         FROM iris_account_statements s
+         LEFT JOIN accounts a ON a.id = s.account_id
+        WHERE s.id = ? AND s.deleted_at IS NULL`, [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Create one
+app.post('/api/iris-statements', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  try {
+    const row = parseStatementRow(req.body || {});
+    const err = validateStatement(row, 0);
+    if (err) return res.status(400).json({ error: err.errors.join('; ') });
+    const [r] = await mysqlPool.query(
+      `INSERT INTO iris_account_statements
+         (account_id, description, received, spent, reconciled, close_balance, transaction_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [row.account_id, row.description, row.received, row.spent, row.reconciled, row.close_balance, row.transaction_date]
+    );
+    res.json({ id: r.insertId, ...row });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Update
+app.put('/api/iris-statements/:id', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const row = parseStatementRow(req.body || {});
+    const err = validateStatement(row, 0);
+    if (err) return res.status(400).json({ error: err.errors.join('; ') });
+    const [r] = await mysqlPool.query(
+      `UPDATE iris_account_statements
+          SET account_id = ?, description = ?, received = ?, spent = ?,
+              reconciled = ?, close_balance = ?, transaction_date = ?
+        WHERE id = ? AND deleted_at IS NULL`,
+      [row.account_id, row.description, row.received, row.spent, row.reconciled, row.close_balance, row.transaction_date, id]
+    );
+    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ id, ...row });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Soft delete
+app.delete('/api/iris-statements/:id', requireAuth, requireRole('approver', 'admin'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const [r] = await mysqlPool.query(
+      `UPDATE iris_account_statements SET deleted_at = NOW(6) WHERE id = ? AND deleted_at IS NULL`, [id]
+    );
+    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true, id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Excel template download
+app.get('/api/iris-statements/template/xlsx', requireAuth, (_req, res) => {
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['account_id', 'description', 'received', 'spent', 'reconciled', 'close_balance', 'transaction_date'],
+    [580, 'Contoh: TRSF E-BANKING masuk', 100000, 0, 1, null, '2026-05-19'],
+    [580, 'Contoh: BIAYA ADM', 0, 30000, 1, null, '2026-05-19'],
+  ]);
+  ws['!cols'] = [{ wch: 12 }, { wch: 50 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 20 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'statements');
+  const ws2 = XLSX.utils.aoa_to_sheet([
+    ['Kolom', 'Wajib', 'Keterangan'],
+    ['account_id', 'YA', 'ID akun (lihat tab accounts atau lookup di UI)'],
+    ['description', 'tidak', 'Keterangan transaksi'],
+    ['received', 'salah satu', 'Nominal masuk (rupiah). Isi 0 jika ini transaksi keluar.'],
+    ['spent', 'salah satu', 'Nominal keluar (rupiah). Isi 0 jika ini transaksi masuk.'],
+    ['reconciled', 'tidak', '1 = sudah reconciled, 0 = belum (default 0)'],
+    ['close_balance', 'tidak', 'Saldo akhir setelah transaksi (boleh kosong)'],
+    ['transaction_date', 'YA', 'Format: YYYY-MM-DD atau YYYY-MM-DD HH:mm:ss'],
+  ]);
+  ws2['!cols'] = [{ wch: 20 }, { wch: 12 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, ws2, 'panduan');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="iris_statements_template.xlsx"');
+  res.send(buf);
+});
+
+// Bulk upload: parse first; if ?commit=1 then insert. Otherwise return preview.
+app.post('/api/iris-statements/bulk-upload', requireAuth, requireRole('maker', 'approver', 'admin'),
+  uploadXlsx.single('file'), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'File required' });
+    try {
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(sheet, { defval: null });
+      const parsed = raw.map(parseStatementRow);
+      const errors = [];
+      parsed.forEach((r, i) => { const e = validateStatement(r, i + 2); if (e) errors.push(e); });
+
+      const commit = req.query.commit === '1' && errors.length === 0;
+      if (!commit) {
+        return res.json({
+          preview: parsed.slice(0, 50),
+          total: parsed.length,
+          errors,
+          commit: false,
+        });
+      }
+      const conn = await mysqlPool.getConnection();
+      try {
+        await conn.beginTransaction();
+        const ids = [];
+        for (const row of parsed) {
+          const [r] = await conn.query(
+            `INSERT INTO iris_account_statements
+               (account_id, description, received, spent, reconciled, close_balance, transaction_date)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [row.account_id, row.description, row.received, row.spent, row.reconciled, row.close_balance, row.transaction_date]
+          );
+          ids.push(r.insertId);
+        }
+        await conn.commit();
+        res.json({ commit: true, inserted: ids.length, ids });
+      } catch (e) {
+        await conn.rollback();
+        res.status(500).json({ error: 'Insert failed: ' + e.message });
+      } finally {
+        conn.release();
+      }
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
 // Health
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
