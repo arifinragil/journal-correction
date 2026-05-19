@@ -73,7 +73,9 @@ export default function IrisStatementsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
-    account_ids: [], from: '', to: '', q: '', reconciled: '', limit: 100, offset: 0,
+    account_ids: [], from: '', to: '', q: '', reconciled: '',
+    sort: 'transaction_date', dir: 'desc',
+    limit: 100, offset: 0,
   });
   const [accounts, setAccounts] = useState([]);
 
@@ -93,7 +95,35 @@ export default function IrisStatementsPage() {
       .then(r => { setItems(r.data.items || []); setTotal(r.data.total || 0); })
       .finally(() => setLoading(false));
   };
-  useEffect(load, [filters.limit, filters.offset]);
+  useEffect(load, [filters.limit, filters.offset, filters.sort, filters.dir]);
+
+  const setSort = (col) => {
+    setFilters(f => ({
+      ...f,
+      sort: col,
+      dir: f.sort === col && f.dir === 'asc' ? 'desc' : 'asc',
+      offset: 0,
+    }));
+  };
+  const arrow = (col) => filters.sort === col ? (filters.dir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  const exportXlsx = async () => {
+    const params = {};
+    Object.entries(filters).forEach(([k, v]) => {
+      if (k === 'account_ids') { if (Array.isArray(v) && v.length > 0) params.account_ids = v.join(','); }
+      else if (k === 'limit' || k === 'offset') { /* skip */ }
+      else if (v !== '' && v != null) params[k] = v;
+    });
+    try {
+      const r = await api.get('/iris-statements/export.xlsx', { params, responseType: 'blob' });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `iris_statements_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { alert('Gagal export: ' + (e.response?.data?.error || e.message)); }
+  };
 
   const onApplyFilters = (e) => { e.preventDefault(); setFilters(f => ({ ...f, offset: 0 })); load(); };
 
@@ -111,6 +141,7 @@ export default function IrisStatementsPage() {
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:flex-wrap mb-3">
           <h2 className="text-lg font-semibold sm:flex-1">💳 Account Statements</h2>
           <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={exportXlsx} className="btn-ghost" title="Export hasil filter ke Excel">📤 Export Excel</button>
             <Link to="/iris-statements/bulk-upload" className="btn-ghost">⤴ Bulk Upload Excel</Link>
             <Link to="/iris-statements/new" className="btn-primary">+ Statement Baru</Link>
           </div>
@@ -144,16 +175,16 @@ export default function IrisStatementsPage() {
         {!loading && items.length === 0 && <p className="p-4 text-sm opacity-60">Tidak ada data.</p>}
         {!loading && items.length > 0 && (
           <table className="min-w-full text-sm">
-            <thead className="bg-prestisa-50 text-prestisa-700">
+            <thead className="bg-prestisa-50 text-prestisa-700 select-none">
               <tr>
-                <th className="text-left px-3 py-2">ID</th>
-                <th className="text-left px-3 py-2">Tanggal</th>
-                <th className="text-left px-3 py-2">No. Akun</th>
-                <th className="text-left px-3 py-2">Akun</th>
-                <th className="text-left px-3 py-2">Deskripsi</th>
-                <th className="text-right px-3 py-2">Masuk</th>
-                <th className="text-right px-3 py-2">Keluar</th>
-                <th className="text-center px-3 py-2">Recon</th>
+                <th className="text-left px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('id')}>ID{arrow('id')}</th>
+                <th className="text-left px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('transaction_date')}>Tanggal{arrow('transaction_date')}</th>
+                <th className="text-left px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('account_number')}>No. Akun{arrow('account_number')}</th>
+                <th className="text-left px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('account_name')}>Akun{arrow('account_name')}</th>
+                <th className="text-left px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('description')}>Deskripsi{arrow('description')}</th>
+                <th className="text-right px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('received')}>Masuk{arrow('received')}</th>
+                <th className="text-right px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('spent')}>Keluar{arrow('spent')}</th>
+                <th className="text-center px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('reconciled')}>Recon{arrow('reconciled')}</th>
                 <th className="text-right px-3 py-2">Aksi</th>
               </tr>
             </thead>

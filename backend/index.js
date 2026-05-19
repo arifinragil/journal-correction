@@ -1177,24 +1177,47 @@ app.get('/api/iris-accounts', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+const STMT_SORT_MAP = {
+  id: 's.id',
+  transaction_date: 's.transaction_date',
+  account_number: 'a.account_number',
+  account_name: 'a.name',
+  description: 's.description',
+  received: 's.received',
+  spent: 's.spent',
+  reconciled: 's.reconciled',
+};
+
+function buildStatementFilters(query) {
+  const { account_id, account_ids, from, to, q, reconciled } = query;
+  const params = [];
+  const where = ['s.deleted_at IS NULL'];
+  const idList = (account_ids ? String(account_ids).split(',') : [])
+    .map(x => parseInt(x, 10)).filter(Number.isInteger);
+  if (idList.length > 0) {
+    where.push(`s.account_id IN (${idList.map(() => '?').join(',')})`);
+    params.push(...idList);
+  } else if (account_id) {
+    where.push('s.account_id = ?'); params.push(parseInt(account_id, 10));
+  }
+  if (from) { where.push('s.transaction_date >= ?'); params.push(from); }
+  if (to) { where.push('s.transaction_date <= ?'); params.push(to + ' 23:59:59'); }
+  if (q) { where.push('s.description LIKE ?'); params.push('%' + q + '%'); }
+  if (reconciled === '0' || reconciled === '1') { where.push('s.reconciled = ?'); params.push(parseInt(reconciled, 10)); }
+  return { where: where.join(' AND '), params };
+}
+
+function buildStatementOrder(query) {
+  const col = STMT_SORT_MAP[query.sort] || 's.transaction_date';
+  const dir = String(query.dir || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+  return `${col} ${dir}, s.id ${dir}`;
+}
+
 // List with filters
 app.get('/api/iris-statements', requireAuth, async (req, res) => {
   try {
-    const { account_id, account_ids, from, to, q, reconciled } = req.query;
-    const params = [];
-    const where = ['s.deleted_at IS NULL'];
-    const idList = (account_ids ? String(account_ids).split(',') : [])
-      .map(x => parseInt(x, 10)).filter(Number.isInteger);
-    if (idList.length > 0) {
-      where.push(`s.account_id IN (${idList.map(() => '?').join(',')})`);
-      params.push(...idList);
-    } else if (account_id) {
-      where.push('s.account_id = ?'); params.push(parseInt(account_id, 10));
-    }
-    if (from) { where.push('s.transaction_date >= ?'); params.push(from); }
-    if (to) { where.push('s.transaction_date <= ?'); params.push(to + ' 23:59:59'); }
-    if (q) { where.push('s.description LIKE ?'); params.push('%' + q + '%'); }
-    if (reconciled === '0' || reconciled === '1') { where.push('s.reconciled = ?'); params.push(parseInt(reconciled, 10)); }
+    const { where, params } = buildStatementFilters(req.query);
+    const order = buildStatementOrder(req.query);
     const limit = Math.min(parseInt(req.query.limit || '100', 10), 500);
     const offset = parseInt(req.query.offset || '0', 10);
 
@@ -1203,15 +1226,60 @@ app.get('/api/iris-statements', requireAuth, async (req, res) => {
               s.reconciled, s.close_balance, s.transaction_date, s.created_at, s.updated_at
          FROM iris_account_statements s
          LEFT JOIN accounts a ON a.id = s.account_id
-        WHERE ${where.join(' AND ')}
-        ORDER BY s.transaction_date DESC, s.id DESC
+        WHERE ${where}
+        ORDER BY ${order}
         LIMIT ? OFFSET ?`,
       [...params, limit, offset]
     );
     const [[cnt]] = await mysqlPool.query(
-      `SELECT COUNT(*) AS total FROM iris_account_statements s WHERE ${where.join(' AND ')}`, params
+      `SELECT COUNT(*) AS total FROM iris_account_statements s WHERE ${where}`, params
     );
     res.json({ items: rows, total: cnt.total, limit, offset });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Export all matching rows as XLSX
+app.get('/api/iris-statements/export.xlsx', requireAuth, async (req, res) => {
+  try {
+    const { where, params } = buildStatementFilters(req.query);
+    const order = buildStatementOrder(req.query);
+    const [rows] = await mysqlPool.query(
+      `SELECT s.id, s.transaction_date, a.account_number, s.account_id, a.name AS account_name,
+              s.description, s.received, s.spent, s.reconciled, s.close_balance,
+              s.created_at, s.updated_at
+         FROM iris_account_statements s
+         LEFT JOIN accounts a ON a.id = s.account_id
+        WHERE ${where}
+        ORDER BY ${order}
+        LIMIT 100000`, params
+    );
+    const data = rows.map(r => ({
+      id: r.id,
+      transaction_date: r.transaction_date ? new Date(r.transaction_date).toISOString().slice(0, 10) : '',
+      account_number: r.account_number || '',
+      account_id: r.account_id,
+      account_name: r.account_name || '',
+      description: r.description || '',
+      received: Number(r.received) || 0,
+      spent: Number(r.spent) || 0,
+      reconciled: r.reconciled ? 1 : 0,
+      close_balance: r.close_balance == null ? '' : Number(r.close_balance),
+      created_at: r.created_at ? new Date(r.created_at).toISOString() : '',
+      updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    ws['!cols'] = [
+      { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 36 },
+      { wch: 50 }, { wch: 14 }, { wch: 14 }, { wch: 8 }, { wch: 14 },
+      { wch: 20 }, { wch: 20 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'statements');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="iris_statements_${stamp}.xlsx"`);
+    res.send(buf);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
