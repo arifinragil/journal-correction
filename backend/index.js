@@ -1180,10 +1180,17 @@ app.get('/api/iris-accounts', requireAuth, async (req, res) => {
 // List with filters
 app.get('/api/iris-statements', requireAuth, async (req, res) => {
   try {
-    const { account_id, from, to, q, reconciled } = req.query;
+    const { account_id, account_ids, from, to, q, reconciled } = req.query;
     const params = [];
     const where = ['s.deleted_at IS NULL'];
-    if (account_id) { where.push('s.account_id = ?'); params.push(parseInt(account_id, 10)); }
+    const idList = (account_ids ? String(account_ids).split(',') : [])
+      .map(x => parseInt(x, 10)).filter(Number.isInteger);
+    if (idList.length > 0) {
+      where.push(`s.account_id IN (${idList.map(() => '?').join(',')})`);
+      params.push(...idList);
+    } else if (account_id) {
+      where.push('s.account_id = ?'); params.push(parseInt(account_id, 10));
+    }
     if (from) { where.push('s.transaction_date >= ?'); params.push(from); }
     if (to) { where.push('s.transaction_date <= ?'); params.push(to + ' 23:59:59'); }
     if (q) { where.push('s.description LIKE ?'); params.push('%' + q + '%'); }
