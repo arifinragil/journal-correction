@@ -56,7 +56,7 @@ export default function IrisStatementsPage() {
             onChange={e => setFilters(f => ({ ...f, account_id: e.target.value }))}
           >
             <option value="">Semua akun</option>
-            {accounts.map(a => <option key={a.id} value={a.id}>{a.id} · {a.name}</option>)}
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.account_number ? `[${a.account_number}] ` : ''}{a.name}</option>)}
           </select>
           <input className="input" type="date" value={filters.from}
             onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} placeholder="Dari" />
@@ -83,6 +83,7 @@ export default function IrisStatementsPage() {
               <tr>
                 <th className="text-left px-3 py-2">ID</th>
                 <th className="text-left px-3 py-2">Tanggal</th>
+                <th className="text-left px-3 py-2">No. Akun</th>
                 <th className="text-left px-3 py-2">Akun</th>
                 <th className="text-left px-3 py-2">Deskripsi</th>
                 <th className="text-right px-3 py-2">Masuk</th>
@@ -96,7 +97,8 @@ export default function IrisStatementsPage() {
                 <tr key={r.id} className="border-t border-prestisa-50 hover:bg-prestisa-50/40">
                   <td className="px-3 py-2 font-mono text-xs">{r.id}</td>
                   <td className="px-3 py-2 whitespace-nowrap">{fmtDateOnly(r.transaction_date)}</td>
-                  <td className="px-3 py-2">{r.account_id} · {r.account_name || '-'}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{r.account_number || '-'}</td>
+                  <td className="px-3 py-2">{r.account_name || `#${r.account_id}`}</td>
                   <td className="px-3 py-2 max-w-md truncate" title={r.description}>{r.description || '-'}</td>
                   <td className="px-3 py-2 text-right text-emerald-700">{r.received > 0 ? fmtIDR(r.received) : '-'}</td>
                   <td className="px-3 py-2 text-right text-rose-700">{r.spent > 0 ? fmtIDR(r.spent) : '-'}</td>

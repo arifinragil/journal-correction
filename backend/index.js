@@ -1169,9 +1169,9 @@ app.get('/api/iris-accounts', requireAuth, async (req, res) => {
     const q = String(req.query.q || '').trim();
     const params = [];
     let where = 'deleted_at IS NULL';
-    if (q) { where += ' AND (name LIKE ? OR CAST(id AS CHAR) = ?)'; params.push('%' + q + '%', q); }
+    if (q) { where += ' AND (name LIKE ? OR account_number LIKE ? OR CAST(id AS CHAR) = ?)'; params.push('%' + q + '%', '%' + q + '%', q); }
     const [rows] = await mysqlPool.query(
-      `SELECT id, name, type, category FROM accounts WHERE ${where} ORDER BY name LIMIT 200`, params
+      `SELECT id, name, account_number, company_code, type, category FROM accounts WHERE ${where} ORDER BY account_number, name LIMIT 500`, params
     );
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1192,7 +1192,7 @@ app.get('/api/iris-statements', requireAuth, async (req, res) => {
     const offset = parseInt(req.query.offset || '0', 10);
 
     const [rows] = await mysqlPool.query(
-      `SELECT s.id, s.account_id, a.name AS account_name, s.description, s.received, s.spent,
+      `SELECT s.id, s.account_id, a.name AS account_name, a.account_number, s.description, s.received, s.spent,
               s.reconciled, s.close_balance, s.transaction_date, s.created_at, s.updated_at
          FROM iris_account_statements s
          LEFT JOIN accounts a ON a.id = s.account_id
@@ -1213,7 +1213,7 @@ app.get('/api/iris-statements/:id', requireAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const [rows] = await mysqlPool.query(
-      `SELECT s.*, a.name AS account_name
+      `SELECT s.*, a.name AS account_name, a.account_number
          FROM iris_account_statements s
          LEFT JOIN accounts a ON a.id = s.account_id
         WHERE s.id = ? AND s.deleted_at IS NULL`, [id]

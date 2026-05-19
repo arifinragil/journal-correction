@@ -84,7 +84,7 @@ export default function IrisStatementFormPage() {
           <select className="input" required value={form.account_id}
             onChange={e => setForm(f => ({ ...f, account_id: e.target.value }))}>
             <option value="">— pilih akun —</option>
-            {accounts.map(a => <option key={a.id} value={a.id}>{a.id} · {a.name}</option>)}
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.account_number ? `[${a.account_number}] ` : ''}{a.name}</option>)}
           </select>
         </div>
 
