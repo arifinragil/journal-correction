@@ -1296,7 +1296,7 @@ app.get('/api/iris-statements/export.xlsx', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Detail
+// Detail (+ clearing document + paired journal entries if reconciled)
 app.get('/api/iris-statements/:id', requireAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -1307,7 +1307,35 @@ app.get('/api/iris-statements/:id', requireAuth, async (req, res) => {
         WHERE s.id = ? AND s.deleted_at IS NULL`, [id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
-    res.json(rows[0]);
+    const stmt = rows[0];
+
+    // Lookup clearing document (1:1 via bank_statement_id). Ignore deleted_at — legacy ORM stamps it always.
+    const [cdRows] = await mysqlPool.query(
+      `SELECT id, document_number, bank_statement_id, created_at
+         FROM iris_clearing_document
+        WHERE bank_statement_id = ?
+        ORDER BY id DESC LIMIT 1`, [id]
+    );
+    stmt.clearing_document = cdRows[0] || null;
+    stmt.paired_entries = [];
+
+    if (cdRows.length) {
+      const [pairs] = await mysqlPool.query(
+        `SELECT je.id, je.journal_id, je.type, je.amount, je.account_id, je.transaction_date,
+                je.status, je.notes,
+                j.entry_id, j.description AS journal_description, j.order_number,
+                a.name AS account_name, a.account_number
+           FROM iris_clearing_document_journal_entries cdj
+           JOIN journal_entries je ON je.id = cdj.journal_entry_id
+           LEFT JOIN journal j ON j.id = je.journal_id
+           LEFT JOIN accounts a ON a.id = je.account_id
+          WHERE cdj.clearing_document_id = ?
+            AND je.deleted_at IS NULL
+          ORDER BY je.id`, [cdRows[0].id]
+      );
+      stmt.paired_entries = pairs;
+    }
+    res.json(stmt);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1327,23 +1355,63 @@ app.post('/api/iris-statements', requireAuth, requireRole('maker', 'approver', '
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Update
+// Update — cascade untick: when reconciled flips 1→0, also set paired journal_entries.status = 0
 app.put('/api/iris-statements/:id', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const row = parseStatementRow(req.body || {});
+  const err = validateStatement(row, 0);
+  if (err) return res.status(400).json({ error: err.errors.join('; ') });
+
+  const conn = await mysqlPool.getConnection();
   try {
-    const id = parseInt(req.params.id, 10);
-    const row = parseStatementRow(req.body || {});
-    const err = validateStatement(row, 0);
-    if (err) return res.status(400).json({ error: err.errors.join('; ') });
-    const [r] = await mysqlPool.query(
+    await conn.beginTransaction();
+
+    const [prev] = await conn.query(
+      `SELECT reconciled FROM iris_account_statements WHERE id = ? AND deleted_at IS NULL FOR UPDATE`, [id]
+    );
+    if (!prev.length) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }); }
+
+    const willUntick = prev[0].reconciled === 1 && row.reconciled === 0;
+    let untickedCount = 0;
+
+    if (willUntick) {
+      const [cdRows] = await conn.query(
+        `SELECT id FROM iris_clearing_document WHERE bank_statement_id = ?`, [id]
+      );
+      if (cdRows.length) {
+        const cdIds = cdRows.map(r => r.id);
+        const [jeRows] = await conn.query(
+          `SELECT journal_entry_id FROM iris_clearing_document_journal_entries WHERE clearing_document_id IN (?)`,
+          [cdIds]
+        );
+        const jeIds = jeRows.map(r => r.journal_entry_id);
+        if (jeIds.length) {
+          const [upd] = await conn.query(
+            `UPDATE journal_entries SET status = 0 WHERE id IN (?) AND status = 1 AND deleted_at IS NULL`,
+            [jeIds]
+          );
+          untickedCount = upd.affectedRows;
+        }
+      }
+    }
+
+    const [r] = await conn.query(
       `UPDATE iris_account_statements
           SET account_id = ?, description = ?, received = ?, spent = ?,
               reconciled = ?, close_balance = ?, transaction_date = ?
         WHERE id = ? AND deleted_at IS NULL`,
       [row.account_id, row.description, row.received, row.spent, row.reconciled, row.close_balance, row.transaction_date, id]
     );
-    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' });
-    res.json({ id, ...row });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    if (r.affectedRows === 0) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }); }
+
+    await conn.commit();
+    res.json({ id, ...row, unticked_journal_entries: untickedCount });
+  } catch (e) {
+    try { await conn.rollback(); } catch {}
+    res.status(500).json({ error: e.message });
+  } finally {
+    conn.release();
+  }
 });
 
 // Soft delete

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import api from '../api';
+import api, { fmtIDR, fmtDate } from '../api';
 import PageHelp from '../components/PageHelp.jsx';
 
 function toDateInput(s) {
@@ -21,6 +21,9 @@ export default function IrisStatementFormPage() {
     account_id: '', description: '', received: 0, spent: 0,
     reconciled: 0, close_balance: '', transaction_date: '',
   });
+  const [origReconciled, setOrigReconciled] = useState(0);
+  const [clearingDoc, setClearingDoc] = useState(null);
+  const [pairedEntries, setPairedEntries] = useState([]);
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
@@ -42,6 +45,9 @@ export default function IrisStatementFormPage() {
         close_balance: d.close_balance == null ? '' : d.close_balance,
         transaction_date: toDateInput(d.transaction_date),
       });
+      setOrigReconciled(d.reconciled ? 1 : 0);
+      setClearingDoc(d.clearing_document || null);
+      setPairedEntries(d.paired_entries || []);
     }).catch(e => setErr(e.response?.data?.error || e.message))
       .finally(() => setLoading(false));
   }, [id]);
@@ -49,6 +55,13 @@ export default function IrisStatementFormPage() {
   const submit = async (e) => {
     e.preventDefault();
     setErr('');
+    const willUntick = isEdit && origReconciled === 1 && form.reconciled === 0 && pairedEntries.length > 0;
+    if (willUntick) {
+      const ok = window.confirm(
+        `Anda akan untick reconcile. ${pairedEntries.length} journal entry pasangan akan ikut di-untick (status 1 → 0). Lanjut?`
+      );
+      if (!ok) return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -145,6 +158,65 @@ export default function IrisStatementFormPage() {
           </button>
         </div>
       </form>
+
+      {isEdit && origReconciled === 1 && clearingDoc && (
+        <div className="card p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h3 className="font-semibold text-prestisa-800">
+              📎 Clearing Document <span className="font-mono text-prestisa-600">#{clearingDoc.document_number}</span>
+            </h3>
+            <span className="text-xs text-prestisa-500">CD id: {clearingDoc.id} · {fmtDate(clearingDoc.created_at)}</span>
+          </div>
+          <p className="text-xs text-prestisa-500">
+            {pairedEntries.length} journal entry pasangan. Untick checkbox <b>Reconciled</b> di atas untuk membatalkan reconcile (statusnya akan ikut di-untick).
+          </p>
+          <div className="table-wrap">
+            <table className="data text-sm">
+              <thead>
+                <tr>
+                  <th>JE ID</th>
+                  <th>Journal</th>
+                  <th>Tanggal</th>
+                  <th>Akun</th>
+                  <th>Type</th>
+                  <th className="text-right">Amount</th>
+                  <th>Status</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pairedEntries.map(p => (
+                  <tr key={p.id}>
+                    <td className="font-mono">{p.id}</td>
+                    <td className="font-mono text-xs">
+                      {p.entry_id || p.journal_id}
+                      {p.order_number ? <div className="text-prestisa-500">{p.order_number}</div> : null}
+                    </td>
+                    <td className="text-xs">{fmtDate(p.transaction_date)}</td>
+                    <td className="text-xs">
+                      {p.account_number ? <span className="font-mono">[{p.account_number}] </span> : null}
+                      {p.account_name}
+                    </td>
+                    <td>
+                      <span className={`pill ${String(p.type).toLowerCase()==='debit' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>{p.type}</span>
+                    </td>
+                    <td className="text-right font-mono">{fmtIDR(p.amount)}</td>
+                    <td>
+                      {p.status === 1
+                        ? <span className="pill bg-emerald-100 text-emerald-700">reconciled</span>
+                        : <span className="pill bg-prestisa-100 text-prestisa-700">open</span>}
+                    </td>
+                    <td className="text-xs max-w-xs truncate" title={p.notes}>{p.notes}</td>
+                  </tr>
+                ))}
+                {pairedEntries.length === 0 && (
+                  <tr><td colSpan={8} className="text-center py-4 text-prestisa-400">Tidak ada journal entry pasangan.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
