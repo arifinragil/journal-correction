@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api, { fmtDate, fmtIDR, statusPill } from '../api';
 import { AuthCtx } from '../App.jsx';
+import PageHelp from '../components/PageHelp.jsx';
 
 export default function DashboardPage() {
   const user = useContext(AuthCtx);
@@ -30,7 +31,15 @@ export default function DashboardPage() {
         <div className="flex items-start md:items-center justify-between gap-3 flex-wrap">
           <div className="min-w-0">
             <div className="text-[10px] md:text-xs uppercase tracking-widest text-prestisa-200">Selamat datang kembali,</div>
-            <h2 className="text-xl md:text-2xl font-bold mt-1 truncate">{user.full_name}</h2>
+            <h2 className="text-xl md:text-2xl font-bold mt-1 truncate flex items-center gap-2">
+              <span className="truncate">{user.full_name}</span>
+              <PageHelp title="Dashboard" items={[
+                'Halaman ringkasan: statistik koreksi (draft/pending/approved/rejected) + daftar request terbaru.',
+                'Menu sidebar: Koreksi (workflow utama), Agent Proposals (usulan AI), Hapus Journal, Account Statements + Request Hapus Statement, User Admin (khusus admin).',
+                'Setiap halaman punya ikon ? di pojok untuk panduan singkat.',
+                'Role saat ini menentukan tombol yang muncul: maker bikin/edit, approver/admin approve, admin kelola user.',
+              ]} />
+            </h2>
             <div className="text-prestisa-100 text-sm mt-1 capitalize">Role: {user.role}</div>
           </div>
           {(user.role === 'maker' || user.role === 'admin') && (

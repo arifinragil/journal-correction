@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { fmtIDR } from '../api';
+import PageHelp from '../components/PageHelp.jsx';
 
 export default function JournalDeletionNewPage() {
   const nav = useNavigate();
@@ -72,7 +73,16 @@ export default function JournalDeletionNewPage() {
   return (
     <div className="space-y-4">
       <div className="card p-4">
-        <h2 className="text-lg font-semibold mb-3">🗑 Request Hapus Journal</h2>
+        <div className="flex items-center gap-2 mb-3">
+          <h2 className="text-lg font-semibold flex-1">🗑 Request Hapus Journal</h2>
+          <PageHelp title="Request Hapus Journal" items={[
+            'Step 1: cari journal berdasarkan Journal ID, Entry ID, atau Order Number.',
+            'Step 2: pilih scope — JOURNAL (hapus semua) atau ENTRY (pilih entry tertentu).',
+            'Untuk scope ENTRY, sistem menghitung balance setelah hapus (debit vs credit) — periksa imbalance!',
+            'Wajib isi alasan. Sistem akan flag jika journal sudah pernah dijadikan sumber correction.',
+            'Submit → request status PENDING menunggu approver/admin (bukan diri sendiri).',
+          ]} />
+        </div>
         <form onSubmit={search} className="flex flex-col sm:flex-row gap-2">
           <input className="input sm:flex-1" placeholder="Cari (ID / Entry ID / Order Number)"
                  value={q} onChange={e => setQ(e.target.value)} autoFocus />

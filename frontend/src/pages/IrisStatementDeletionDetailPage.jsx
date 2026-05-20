@@ -2,6 +2,7 @@ import React, { useEffect, useState, useContext } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api, { fmtIDR, fmtDate, fmtDateOnly } from '../api';
 import { AuthCtx } from '../App.jsx';
+import PageHelp from '../components/PageHelp.jsx';
 
 export default function IrisStatementDeletionDetailPage() {
   const { id } = useParams();
@@ -40,7 +41,16 @@ export default function IrisStatementDeletionDetailPage() {
     <div className="space-y-4 max-w-4xl">
       <div className="card p-4 flex items-center gap-3 flex-wrap">
         <Link to="/iris-statement-deletions" className="btn-ghost">← Kembali</Link>
-        <h2 className="text-lg font-semibold flex-1">Request Hapus #{r.id}</h2>
+        <h2 className="text-lg font-semibold flex-1 flex items-center gap-2">
+          Request Hapus #{r.id}
+          <PageHelp title="Detail Request" items={[
+            'Snapshot menyimpan kondisi statement saat request dibuat (account, nominal, tanggal).',
+            'Audit Log mencatat seluruh aksi beserta aktor dan waktu.',
+            'Status PENDING → bisa Approve / Reject (hanya approver/admin, dan bukan maker sendiri).',
+            'Status APPROVED berarti soft-delete di MySQL sudah dijalankan (lihat executed_at).',
+            'Status REJECTED berarti tidak ada perubahan di MySQL.',
+          ]} />
+        </h2>
         <span className={`px-2 py-1 text-xs rounded ${
           r.status === 'PENDING' ? 'bg-amber-100 text-amber-800' :
           r.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :

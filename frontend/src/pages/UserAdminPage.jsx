@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api, { fmtDate } from '../api';
+import PageHelp from '../components/PageHelp.jsx';
 
 const ROLE_PILL = {
   maker: 'bg-blue-100 text-blue-700',
@@ -100,8 +101,15 @@ export default function UserAdminPage() {
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2">
         <div className="card overflow-hidden">
-          <div className="px-5 py-3 border-b border-prestisa-100 font-semibold text-prestisa-800">
-            Users — {users.length}
+          <div className="px-5 py-3 border-b border-prestisa-100 font-semibold text-prestisa-800 flex items-center gap-2">
+            <span className="flex-1">Users — {users.length}</span>
+            <PageHelp title="User Admin" items={[
+              'Kelola user aplikasi: tambah, edit role, aktif/nonaktifkan.',
+              'Role: maker (bikin koreksi/request), approver (approve/reject), admin (semua + kelola user).',
+              'Untuk reset password user: edit baris user → set password baru.',
+              'Setelah toggle Active = false, user tidak bisa login lagi sampai diaktifkan ulang.',
+              'Form di kanan untuk tambah user baru.',
+            ]} />
           </div>
           <div className="table-wrap"><table className="data min-w-[700px]">
             <thead><tr><th>ID</th><th>Username</th><th>Nama</th><th>Role</th><th>Active</th><th>Dibuat</th><th></th></tr></thead>

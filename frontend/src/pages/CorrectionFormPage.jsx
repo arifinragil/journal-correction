@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { fmtIDR } from '../api';
+import PageHelp from '../components/PageHelp.jsx';
 
 function StepIndicator({ step }) {
   const steps = ['Lookup Journal', 'Edit Entries', 'Review & Submit'];
@@ -170,7 +171,17 @@ export default function CorrectionFormPage() {
 
       {step === 1 && (
         <div className="card p-5 md:p-8 max-w-4xl">
-          <h2 className="text-lg md:text-xl font-bold text-prestisa-800 mb-1">Buat Koreksi Journal</h2>
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="text-lg md:text-xl font-bold text-prestisa-800 flex-1">Buat Koreksi Journal</h2>
+            <PageHelp title="Buat Koreksi" items={[
+              'Step 1: pilih mode + masukkan Journal ID atau Entry ID dari MySQL produksi.',
+              'Mode CORRECTION: ubah entry yang sudah ada (debit/credit, amount, account, notes, tanggal).',
+              'Mode ADD_ENTRIES: tambah entry baru ke journal yang sama (untuk lengkapi balance).',
+              'Step 2: load data → edit nilai koreksi → cek total debit = credit di semua entry journal.',
+              'Step 3: isi alasan koreksi (wajib), simpan sebagai DRAFT atau langsung Submit (PENDING).',
+              'Approver akan review setelah status PENDING.',
+            ]} />
+          </div>
           <p className="text-sm text-prestisa-500 mb-4">Pilih mode dan masukkan ID journal/entry dari sistem produksi.</p>
 
           <div className="mb-5">

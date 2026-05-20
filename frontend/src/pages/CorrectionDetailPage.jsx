@@ -2,6 +2,7 @@ import React, { useEffect, useState, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api, { fmtDate, fmtDateOnly, fmtIDR, statusPill } from '../api';
 import { AuthCtx } from '../App.jsx';
+import PageHelp from '../components/PageHelp.jsx';
 
 function diffCell(a, b) {
   const same = String(a ?? '') === String(b ?? '');
@@ -80,6 +81,14 @@ export default function CorrectionDetailPage() {
             <div className="flex items-center gap-3 mb-1 flex-wrap">
               <h2 className="text-xl md:text-2xl font-extrabold text-prestisa-900 font-mono break-all">{h.correction_journal_id}</h2>
               <span className={statusPill(h.status)}>{h.status}</span>
+              <PageHelp title="Detail Koreksi" items={[
+                'Halaman detail satu request koreksi. Lihat header (status, alasan, reviewer note) + daftar entry koreksi.',
+                'Status DRAFT: maker bisa edit ulang atau submit untuk approval.',
+                'Status PENDING: approver/admin bisa Approve/Reject (kecuali maker sendiri).',
+                'Status APPROVED: koreksi sudah diterapkan ke MySQL produksi (perubahan entry / penambahan entry).',
+                'Status REJECTED: tidak ada perubahan di MySQL, alasan ditolak ada di review note.',
+                'Lampiran (file) bisa diunggah maker untuk bukti pendukung.',
+              ]} />
             </div>
             <div className="text-sm text-prestisa-600 max-w-2xl">{h.reason}</div>
             {h.review_note && (

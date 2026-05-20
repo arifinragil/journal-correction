@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api, { fmtIDR } from '../api';
+import PageHelp from '../components/PageHelp.jsx';
 
 export default function IrisStatementBulkUploadPage() {
   const nav = useNavigate();
@@ -45,6 +46,14 @@ export default function IrisStatementBulkUploadPage() {
       <div className="card p-4 flex items-center gap-3 flex-wrap">
         <Link to="/iris-statements" className="btn-ghost">← Kembali</Link>
         <h2 className="text-lg font-semibold flex-1">⤴ Bulk Upload Statements (Excel)</h2>
+        <PageHelp title="Bulk Upload" items={[
+          'Upload banyak baris statement sekaligus dari file Excel/CSV.',
+          'Step 1: download template (klik 📥 Download Template) supaya format kolom benar.',
+          'Step 2: isi data di template — kolom wajib: account_id, transaction_date, dan salah satu received/spent.',
+          'Step 3: pilih file, klik Preview untuk validasi (50 baris pertama ditampilkan, semua error dicek).',
+          'Step 4: kalau tidak ada error → klik "Upload & Simpan" untuk insert ke database (transactional).',
+          'Tombol simpan ter-disable jika ada error pada preview.',
+        ]} />
         <button onClick={downloadTemplate} className="btn-ghost">📥 Download Template</button>
       </div>
 

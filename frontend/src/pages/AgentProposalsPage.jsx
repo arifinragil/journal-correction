@@ -2,6 +2,7 @@ import React, { useEffect, useState, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { fmtDate, fmtIDR } from '../api';
 import { AuthCtx } from '../App.jsx';
+import PageHelp from '../components/PageHelp.jsx';
 
 export default function AgentProposalsPage() {
   const user = useContext(AuthCtx);
@@ -49,7 +50,15 @@ export default function AgentProposalsPage() {
   return (
     <div className="space-y-4">
       <div className="card p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:flex-wrap">
-        <h2 className="text-lg font-semibold sm:flex-1">🤖 Agent Proposals</h2>
+        <h2 className="text-lg font-semibold sm:flex-1 flex items-center gap-2">
+          🤖 Agent Proposals
+          <PageHelp title="Agent Proposals" items={[
+            'Daftar usulan koreksi otomatis dari AI agent (proposal).',
+            'Status pending: belum diputuskan. Approve = create koreksi DRAFT. Reject = tutup proposal.',
+            'Setiap proposal berisi journal_id target dan rekomendasi entry koreksi beserta alasan.',
+            'Review payload, lalu putuskan accept/reject. Approve membuat record di tabel corrections (DRAFT) untuk diteruskan oleh maker/approver.',
+          ]} />
+        </h2>
         <div className="flex items-center gap-2 flex-wrap">
           <select className="input w-auto flex-1 sm:flex-none" value={status} onChange={e => setStatus(e.target.value)}>
             <option value="pending">Pending</option>

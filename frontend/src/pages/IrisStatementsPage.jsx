@@ -2,6 +2,7 @@ import React, { useEffect, useState, useContext, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import api, { fmtIDR, fmtDateOnly } from '../api';
 import { AuthCtx } from '../App.jsx';
+import PageHelp from '../components/PageHelp.jsx';
 
 function AccountMultiSelect({ accounts, value, onChange }) {
   const [open, setOpen] = useState(false);
@@ -141,7 +142,18 @@ export default function IrisStatementsPage() {
     <div className="space-y-4">
       <div className="card p-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:flex-wrap mb-3">
-          <h2 className="text-lg font-semibold sm:flex-1">💳 Account Statements</h2>
+          <h2 className="text-lg font-semibold sm:flex-1 flex items-center gap-2">
+            💳 Account Statements
+            <PageHelp title="Account Statements" items={[
+              'Halaman ini menampilkan mutasi rekening (iris_account_statements) dengan filter, sort, dan pagination.',
+              'Klik header kolom untuk sort asc/desc; klik lagi untuk toggle arah.',
+              'Filter akun multi-select dengan search; filter tanggal & status reconciled.',
+              '📤 Export Excel: menghasilkan file .xlsx mengikuti filter + sort aktif (maks 100k baris).',
+              '⤴ Bulk Upload: import banyak baris dari Excel (preview → simpan).',
+              '+ Statement Baru: input satu baris manual.',
+              'Tombol "Request Hapus" membuat request approval (bukan hapus langsung).',
+            ]} />
+          </h2>
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={exportXlsx} className="btn-ghost" title="Export hasil filter ke Excel">📤 Export Excel</button>
             <Link to="/iris-statement-deletions" className="btn-ghost">🗑 Request Hapus</Link>

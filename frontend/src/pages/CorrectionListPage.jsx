@@ -2,6 +2,7 @@ import React, { useEffect, useState, useContext } from 'react';
 import { Link } from 'react-router-dom';
 import api, { fmtDate, fmtIDR, statusPill } from '../api';
 import { AuthCtx } from '../App.jsx';
+import PageHelp from '../components/PageHelp.jsx';
 
 export default function CorrectionListPage() {
   const user = useContext(AuthCtx);
@@ -25,6 +26,16 @@ export default function CorrectionListPage() {
 
   return (
     <div className="space-y-4">
+      <div className="card p-3 flex items-center gap-2">
+        <h2 className="text-lg font-semibold flex-1">📋 Koreksi Journal</h2>
+        <PageHelp title="Koreksi Journal" items={[
+          'Daftar request koreksi journal MySQL. Status: DRAFT → PENDING → APPROVED/REJECTED.',
+          'Maker: bikin request (+ Koreksi Baru), edit selama masih DRAFT, lalu submit jadi PENDING.',
+          'Approver/admin: review request PENDING dan approve/reject (tidak bisa approve sendiri).',
+          'Filter pakai search box (ID/alasan), select status, dan checkbox "Milik saya".',
+          'Mode CORRECTION mengubah entry existing. Mode ADD_ENTRIES menambahkan entry baru ke journal yang sama.',
+        ]} />
+      </div>
       <div className="card p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:flex-wrap">
         <input className="input flex-1 sm:min-w-[200px]" placeholder="Cari ID atau alasan…" value={q}
                onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()} />

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import api from '../api';
+import PageHelp from '../components/PageHelp.jsx';
 
 function toDateInput(s) {
   if (!s) return '';
@@ -73,7 +74,15 @@ export default function IrisStatementFormPage() {
     <div className="max-w-2xl space-y-4">
       <div className="card p-4 flex items-center gap-3">
         <Link to="/iris-statements" className="btn-ghost">← Kembali</Link>
-        <h2 className="text-lg font-semibold">{isEdit ? `Edit Statement #${id}` : 'Statement Baru'}</h2>
+        <h2 className="text-lg font-semibold flex-1">{isEdit ? `Edit Statement #${id}` : 'Statement Baru'}</h2>
+        <PageHelp title={isEdit ? 'Edit Statement' : 'Statement Baru'} items={[
+          'Form ini membuat / mengubah 1 baris mutasi rekening (iris_account_statements).',
+          'Pilih Akun dari dropdown (sudah include nomor akun).',
+          'Tanggal Transaksi wajib diisi.',
+          'Masuk (Received) dan Keluar (Spent) saling eksklusif — hanya salah satu yang boleh > 0.',
+          'Close Balance opsional, hanya untuk catatan saldo akhir baris ini.',
+          'Centang Reconciled jika baris sudah cocok dengan pembukuan.',
+        ]} />
       </div>
 
       {err && <div className="card p-3 bg-rose-50 text-rose-800 text-sm">{err}</div>}

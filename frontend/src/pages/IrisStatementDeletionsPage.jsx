@@ -2,6 +2,7 @@ import React, { useEffect, useState, useContext } from 'react';
 import { Link } from 'react-router-dom';
 import api, { fmtIDR, fmtDate, fmtDateOnly } from '../api';
 import { AuthCtx } from '../App.jsx';
+import PageHelp from '../components/PageHelp.jsx';
 
 const STATUS_PILL = {
   PENDING:  'bg-amber-100 text-amber-800',
@@ -38,7 +39,17 @@ export default function IrisStatementDeletionsPage() {
   return (
     <div className="space-y-4">
       <div className="card p-4 flex items-center gap-3 flex-wrap">
-        <h2 className="text-lg font-semibold flex-1">🗑 Request Hapus Statement</h2>
+        <h2 className="text-lg font-semibold flex-1 flex items-center gap-2">
+          🗑 Request Hapus Statement
+          <PageHelp title="Request Hapus Statement" items={[
+            'Daftar request penghapusan baris iris_account_statements.',
+            'Maker membuat request dengan alasan; data MySQL belum dihapus sampai disetujui.',
+            'Approver/admin meng-approve atau reject — separation of duty: maker tidak boleh approve request sendiri.',
+            'Approve menjalankan soft-delete (deleted_at = NOW) di MySQL secara transaksional.',
+            'Semua aksi (CREATE, APPROVE, REJECT, EXECUTE, EXECUTE_FAILED) tercatat di audit log per-request.',
+            'Filter status di kanan atas untuk melihat PENDING / APPROVED / REJECTED.',
+          ]} />
+        </h2>
         <Link to="/iris-statements" className="btn-ghost">← Statements</Link>
         <select className="input" value={status} onChange={e => setStatus(e.target.value)}>
           <option value="">Semua status</option>

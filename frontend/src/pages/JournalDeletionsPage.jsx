@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api, { fmtDate } from '../api';
+import PageHelp from '../components/PageHelp.jsx';
 
 const STATUS_CLASS = {
   PENDING:  'bg-amber-100 text-amber-800',
@@ -24,7 +25,16 @@ export default function JournalDeletionsPage() {
   return (
     <div className="space-y-4">
       <div className="card p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:flex-wrap">
-        <h2 className="text-lg font-semibold sm:flex-1">🗑 Hapus Journal</h2>
+        <h2 className="text-lg font-semibold sm:flex-1 flex items-center gap-2">
+          🗑 Hapus Journal
+          <PageHelp title="Hapus Journal" items={[
+            'Daftar request penghapusan journal/entry di MySQL.',
+            'Scope JOURNAL → hapus journal beserta semua entry-nya. Scope ENTRY → hanya entry tertentu.',
+            'Maker membuat request via "+ Request Baru". Approver/admin approve/reject.',
+            'Approve menjalankan soft-delete (deleted_at = NOW) di MySQL secara transaksional dengan separation of duty.',
+            'Audit log tercatat per-request: CREATE / APPROVE / REJECT / EXECUTE / EXECUTE_FAILED.',
+          ]} />
+        </h2>
         <div className="flex items-center gap-2 flex-wrap">
           <select className="input w-auto" value={status} onChange={e => setStatus(e.target.value)}>
             <option value="PENDING">Pending</option>

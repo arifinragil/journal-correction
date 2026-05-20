@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api, { fmtDate, fmtIDR } from '../api';
 import { AuthCtx } from '../App.jsx';
+import PageHelp from '../components/PageHelp.jsx';
 
 const STATUS_CLASS = {
   PENDING:  'bg-amber-100 text-amber-800',
@@ -46,10 +47,18 @@ export default function JournalDeletionDetailPage() {
       <div className="card p-4 flex items-start justify-between flex-wrap gap-2">
         <div>
           <Link to="/journal-deletions" className="text-sm text-prestisa-500 hover:underline">← Kembali</Link>
-          <h2 className="text-lg font-semibold mt-1">
+          <h2 className="text-lg font-semibold mt-1 flex items-center gap-2 flex-wrap">
             Request #{r.id}
-            <span className="ml-2 pill bg-slate-100 text-slate-700">{r.scope}</span>
-            <span className={`ml-2 pill ${STATUS_CLASS[r.status]}`}>{r.status}</span>
+            <span className="pill bg-slate-100 text-slate-700">{r.scope}</span>
+            <span className={`pill ${STATUS_CLASS[r.status]}`}>{r.status}</span>
+            <PageHelp title="Detail Hapus Journal" items={[
+              'Snapshot menyimpan kondisi journal/entries saat request dibuat.',
+              'Untuk scope ENTRY ada perhitungan balance_after — wajib check imbalance sebelum approve.',
+              'Approve: jalankan soft-delete di MySQL transaksional, tulis log APPROVE+EXECUTE.',
+              'Reject: tidak ada perubahan di MySQL, log REJECT.',
+              'Separation of duty: maker tidak bisa approve/reject request sendiri.',
+              'Audit log mencatat seluruh aksi beserta aktor & waktu.',
+            ]} />
           </h2>
         </div>
       </div>
