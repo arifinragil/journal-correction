@@ -1236,9 +1236,11 @@ app.get('/api/iris-statements', requireAuth, async (req, res) => {
 
     const [rows] = await mysqlPool.query(
       `SELECT s.id, s.account_id, a.name AS account_name, a.account_number, s.description, s.received, s.spent,
-              s.reconciled, s.close_balance, s.transaction_date, s.created_at, s.updated_at
+              s.reconciled, s.close_balance, s.transaction_date, s.created_at, s.updated_at,
+              cd.document_number AS clearing_document_number
          FROM iris_account_statements s
          LEFT JOIN accounts a ON a.id = s.account_id
+         LEFT JOIN iris_clearing_document cd ON cd.bank_statement_id = s.id
         WHERE ${where}
         ORDER BY ${order}
         LIMIT ? OFFSET ?`,
@@ -1259,9 +1261,11 @@ app.get('/api/iris-statements/export.xlsx', requireAuth, async (req, res) => {
     const [rows] = await mysqlPool.query(
       `SELECT s.id, s.transaction_date, a.account_number, s.account_id, a.name AS account_name,
               s.description, s.received, s.spent, s.reconciled, s.close_balance,
-              s.created_at, s.updated_at
+              s.created_at, s.updated_at,
+              cd.document_number AS clearing_document_number
          FROM iris_account_statements s
          LEFT JOIN accounts a ON a.id = s.account_id
+         LEFT JOIN iris_clearing_document cd ON cd.bank_statement_id = s.id
         WHERE ${where}
         ORDER BY ${order}
         LIMIT 100000`, params
@@ -1276,6 +1280,7 @@ app.get('/api/iris-statements/export.xlsx', requireAuth, async (req, res) => {
       received: Number(r.received) || 0,
       spent: Number(r.spent) || 0,
       reconciled: r.reconciled ? 1 : 0,
+      clearing_document_number: r.clearing_document_number || '',
       close_balance: r.close_balance == null ? '' : Number(r.close_balance),
       created_at: r.created_at ? new Date(r.created_at).toISOString() : '',
       updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : '',
@@ -1372,9 +1377,11 @@ app.put('/api/iris-statements/:id', requireAuth, requireRole('maker', 'approver'
     if (!prev.length) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }); }
 
     const willUntick = prev[0].reconciled === 1 && row.reconciled === 0;
-    let untickedCount = 0;
+    const willRetick = prev[0].reconciled === 0 && row.reconciled === 1;
+    let cascadedCount = 0;
+    let cascadeDir = null;
 
-    if (willUntick) {
+    if (willUntick || willRetick) {
       const [cdRows] = await conn.query(
         `SELECT id FROM iris_clearing_document WHERE bank_statement_id = ?`, [id]
       );
@@ -1386,11 +1393,21 @@ app.put('/api/iris-statements/:id', requireAuth, requireRole('maker', 'approver'
         );
         const jeIds = jeRows.map(r => r.journal_entry_id);
         if (jeIds.length) {
-          const [upd] = await conn.query(
-            `UPDATE journal_entries SET status = 0 WHERE id IN (?) AND status = 1 AND deleted_at IS NULL`,
-            [jeIds]
-          );
-          untickedCount = upd.affectedRows;
+          if (willUntick) {
+            const [upd] = await conn.query(
+              `UPDATE journal_entries SET status = 0 WHERE id IN (?) AND status = 1 AND deleted_at IS NULL`,
+              [jeIds]
+            );
+            cascadedCount = upd.affectedRows;
+            cascadeDir = 'untick';
+          } else {
+            const [upd] = await conn.query(
+              `UPDATE journal_entries SET status = 1 WHERE id IN (?) AND status = 0 AND deleted_at IS NULL`,
+              [jeIds]
+            );
+            cascadedCount = upd.affectedRows;
+            cascadeDir = 'retick';
+          }
         }
       }
     }
@@ -1405,7 +1422,7 @@ app.put('/api/iris-statements/:id', requireAuth, requireRole('maker', 'approver'
     if (r.affectedRows === 0) { await conn.rollback(); return res.status(404).json({ error: 'Not found' }); }
 
     await conn.commit();
-    res.json({ id, ...row, unticked_journal_entries: untickedCount });
+    res.json({ id, ...row, cascade_direction: cascadeDir, cascaded_journal_entries: cascadedCount });
   } catch (e) {
     try { await conn.rollback(); } catch {}
     res.status(500).json({ error: e.message });

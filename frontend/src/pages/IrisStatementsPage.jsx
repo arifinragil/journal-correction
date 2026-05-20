@@ -200,6 +200,7 @@ export default function IrisStatementsPage() {
                 <th className="text-right px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('received')}>Masuk{arrow('received')}</th>
                 <th className="text-right px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('spent')}>Keluar{arrow('spent')}</th>
                 <th className="text-center px-3 py-2 cursor-pointer hover:bg-prestisa-100" onClick={() => setSort('reconciled')}>Recon{arrow('reconciled')}</th>
+                <th className="text-left px-3 py-2">Clearing Doc</th>
                 <th className="text-right px-3 py-2">Aksi</th>
               </tr>
             </thead>
@@ -217,6 +218,7 @@ export default function IrisStatementsPage() {
                     {r.reconciled ? <span className="inline-block px-2 py-0.5 text-xs rounded bg-emerald-100 text-emerald-800">✓</span>
                                   : <span className="inline-block px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-800">⏳</span>}
                   </td>
+                  <td className="px-3 py-2 font-mono text-xs text-prestisa-600">{r.clearing_document_number || '-'}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <Link to={`/iris-statements/${r.id}`} className="text-prestisa-700 hover:underline">Edit</Link>
                     {' · '}

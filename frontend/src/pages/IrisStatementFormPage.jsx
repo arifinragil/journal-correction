@@ -56,9 +56,15 @@ export default function IrisStatementFormPage() {
     e.preventDefault();
     setErr('');
     const willUntick = isEdit && origReconciled === 1 && form.reconciled === 0 && pairedEntries.length > 0;
+    const willRetick = isEdit && origReconciled === 0 && form.reconciled === 1 && pairedEntries.length > 0;
     if (willUntick) {
       const ok = window.confirm(
         `Anda akan untick reconcile. ${pairedEntries.length} journal entry pasangan akan ikut di-untick (status 1 → 0). Lanjut?`
+      );
+      if (!ok) return;
+    } else if (willRetick) {
+      const ok = window.confirm(
+        `Anda akan re-tick reconcile. ${pairedEntries.length} journal entry pasangan akan ikut di-tick (status 0 → 1). Lanjut?`
       );
       if (!ok) return;
     }
@@ -159,7 +165,7 @@ export default function IrisStatementFormPage() {
         </div>
       </form>
 
-      {isEdit && origReconciled === 1 && clearingDoc && (
+      {isEdit && clearingDoc && (
         <div className="card p-4 space-y-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <h3 className="font-semibold text-prestisa-800">
@@ -167,8 +173,24 @@ export default function IrisStatementFormPage() {
             </h3>
             <span className="text-xs text-prestisa-500">CD id: {clearingDoc.id} · {fmtDate(clearingDoc.created_at)}</span>
           </div>
+          {(() => {
+            const totalDebit = pairedEntries.filter(p => String(p.type).toLowerCase() === 'debit').reduce((s, p) => s + Number(p.amount || 0), 0);
+            const totalCredit = pairedEntries.filter(p => String(p.type).toLowerCase() === 'credit').reduce((s, p) => s + Number(p.amount || 0), 0);
+            const stmtAmt = Number(form.received) > 0 ? Number(form.received) : Number(form.spent);
+            const mismatch = pairedEntries.length > 0 && Math.abs(totalDebit - totalCredit) > 0.01;
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div className="bg-prestisa-50 rounded px-3 py-2"><div className="text-prestisa-500">Paired Entries</div><div className="font-semibold text-prestisa-800">{pairedEntries.length}</div></div>
+                <div className="bg-blue-50 rounded px-3 py-2"><div className="text-blue-600">Total Debit</div><div className="font-mono font-semibold text-blue-800">{fmtIDR(totalDebit)}</div></div>
+                <div className="bg-amber-50 rounded px-3 py-2"><div className="text-amber-600">Total Credit</div><div className="font-mono font-semibold text-amber-800">{fmtIDR(totalCredit)}</div></div>
+                <div className={`rounded px-3 py-2 ${mismatch ? 'bg-rose-50' : 'bg-emerald-50'}`}><div className={mismatch ? 'text-rose-600' : 'text-emerald-600'}>Statement Amt</div><div className={`font-mono font-semibold ${mismatch ? 'text-rose-800' : 'text-emerald-800'}`}>{fmtIDR(stmtAmt)}</div></div>
+              </div>
+            );
+          })()}
           <p className="text-xs text-prestisa-500">
-            {pairedEntries.length} journal entry pasangan. Untick checkbox <b>Reconciled</b> di atas untuk membatalkan reconcile (statusnya akan ikut di-untick).
+            {form.reconciled
+              ? <>Untick checkbox <b>Reconciled</b> di atas untuk membatalkan reconcile — {pairedEntries.length} journal entry pasangan akan ikut di-untick.</>
+              : <>Statement ini tidak reconciled, tapi masih punya clearing document. Re-tick checkbox <b>Reconciled</b> untuk meng-aktifkan kembali (paired entries akan ikut di-tick).</>}
           </p>
           <div className="table-wrap">
             <table className="data text-sm">
