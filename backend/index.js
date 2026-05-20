@@ -1347,14 +1347,211 @@ app.put('/api/iris-statements/:id', requireAuth, requireRole('maker', 'approver'
 });
 
 // Soft delete
-app.delete('/api/iris-statements/:id', requireAuth, requireRole('approver', 'admin'), async (req, res) => {
+// Legacy direct delete disabled — use POST /api/iris-statement-deletions (approval workflow)
+app.delete('/api/iris-statements/:id', requireAuth, (_req, res) => {
+  res.status(405).json({ error: 'Hapus statement harus melalui request approval. Gunakan POST /api/iris-statement-deletions.' });
+});
+
+// ============================================================================
+// iris_account_statements: deletion request + approval workflow
+// ============================================================================
+
+async function loadStatementSnapshot(id) {
+  const [rows] = await mysqlPool.query(
+    `SELECT s.id, s.account_id, s.description, s.received, s.spent, s.reconciled,
+            s.close_balance, s.transaction_date, s.created_at, s.updated_at,
+            a.account_number, a.name AS account_name
+       FROM iris_account_statements s
+       LEFT JOIN accounts a ON a.id = s.account_id
+      WHERE s.id = ? AND s.deleted_at IS NULL`, [id]
+  );
+  return rows[0] || null;
+}
+
+// Create deletion request
+app.post('/api/iris-statement-deletions', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const mysql_statement_id = parseInt(req.body?.mysql_statement_id, 10);
+  const reason = String(req.body?.reason || '').trim();
+  if (!Number.isInteger(mysql_statement_id) || mysql_statement_id <= 0) return res.status(400).json({ error: 'mysql_statement_id required' });
+  if (reason.length < 5) return res.status(400).json({ error: 'reason minimal 5 karakter' });
   try {
-    const id = parseInt(req.params.id, 10);
-    const [r] = await mysqlPool.query(
-      `UPDATE iris_account_statements SET deleted_at = NOW(6) WHERE id = ? AND deleted_at IS NULL`, [id]
+    const snap = await loadStatementSnapshot(mysql_statement_id);
+    if (!snap) return res.status(404).json({ error: 'Statement tidak ditemukan atau sudah dihapus' });
+
+    const { rows: existing } = await pg.query(
+      `SELECT id FROM iris_statement_deletion_requests
+        WHERE mysql_statement_id = $1 AND status = 'PENDING' LIMIT 1`, [mysql_statement_id]
     );
-    if (r.affectedRows === 0) return res.status(404).json({ error: 'Not found' });
-    res.json({ ok: true, id });
+    if (existing.length > 0) return res.status(409).json({ error: `Sudah ada request pending #${existing[0].id} untuk statement ini` });
+
+    const snapshot = { ...snap, captured_at: new Date().toISOString() };
+    const { rows } = await pg.query(
+      `INSERT INTO iris_statement_deletion_requests (mysql_statement_id, snapshot, reason, created_by)
+       VALUES ($1::int, $2::jsonb, $3::text, $4::int) RETURNING id`,
+      [mysql_statement_id, JSON.stringify(snapshot), reason, req.session.userId]
+    );
+    const reqId = rows[0].id;
+    await pg.query(
+      `INSERT INTO iris_statement_deletion_audit_logs (request_id, action, actor_id, details)
+       VALUES ($1, 'CREATE', $2, $3::jsonb)`,
+      [reqId, req.session.userId, JSON.stringify({ mysql_statement_id, reason })]
+    );
+    res.status(201).json({ ok: true, id: reqId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// List deletion requests
+app.get('/api/iris-statement-deletions', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const status = req.query.status ? String(req.query.status).toUpperCase() : null;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+  try {
+    const params = [];
+    const where = [];
+    if (status && ['PENDING', 'APPROVED', 'REJECTED'].includes(status)) {
+      params.push(status); where.push(`r.status = $${params.length}`);
+    }
+    params.push(limit);
+    const { rows } = await pg.query(
+      `SELECT r.id, r.mysql_statement_id, r.reason, r.status, r.created_at, r.decided_at,
+              r.decision_notes,
+              uc.username AS created_by_username, uc.full_name AS created_by_name,
+              ud.username AS decided_by_username, ud.full_name AS decided_by_name,
+              r.snapshot->>'description' AS statement_description,
+              r.snapshot->>'transaction_date' AS transaction_date,
+              r.snapshot->>'account_number' AS account_number,
+              r.snapshot->>'account_name' AS account_name,
+              r.snapshot->>'received' AS received,
+              r.snapshot->>'spent' AS spent
+         FROM iris_statement_deletion_requests r
+         LEFT JOIN users uc ON uc.id = r.created_by
+         LEFT JOIN users ud ON ud.id = r.decided_by
+        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY r.created_at DESC LIMIT $${params.length}`,
+      params
+    );
+    res.json({ items: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Detail
+app.get('/api/iris-statement-deletions/:id', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const { rows } = await pg.query(
+      `SELECT r.*, uc.username AS created_by_username, uc.full_name AS created_by_name,
+              ud.username AS decided_by_username, ud.full_name AS decided_by_name
+         FROM iris_statement_deletion_requests r
+         LEFT JOIN users uc ON uc.id = r.created_by
+         LEFT JOIN users ud ON ud.id = r.decided_by
+        WHERE r.id = $1::int`, [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const { rows: logs } = await pg.query(
+      `SELECT l.id, l.action, l.actor_id, l.details, l.created_at,
+              u.username AS actor_username, u.full_name AS actor_name
+         FROM iris_statement_deletion_audit_logs l
+         LEFT JOIN users u ON u.id = l.actor_id
+        WHERE l.request_id = $1::int ORDER BY l.id`, [id]
+    );
+    res.json({ request: rows[0], logs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Approve → executes soft-delete on MySQL
+app.post('/api/iris-statement-deletions/:id/approve', requireAuth, requireRole('approver', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const notes = req.body?.notes ? String(req.body.notes) : null;
+  const decider = req.session.userId;
+
+  const pgClient = await pg.connect();
+  let mysqlConn = null;
+  try {
+    await pgClient.query('BEGIN');
+    const { rows } = await pgClient.query(
+      `SELECT id, mysql_statement_id, status, created_by
+         FROM iris_statement_deletion_requests WHERE id = $1::int FOR UPDATE`, [id]
+    );
+    if (rows.length === 0) { await pgClient.query('ROLLBACK'); return res.status(404).json({ error: 'Not found' }); }
+    const r = rows[0];
+    if (r.status !== 'PENDING') { await pgClient.query('ROLLBACK'); return res.status(409).json({ error: 'Already decided' }); }
+    if (r.created_by === decider) { await pgClient.query('ROLLBACK'); return res.status(403).json({ error: 'Cannot approve own request (separation of duty)' }); }
+
+    mysqlConn = await mysqlPool.getConnection();
+    await mysqlConn.beginTransaction();
+    const [u] = await mysqlConn.query(
+      `UPDATE iris_account_statements SET deleted_at = NOW(6) WHERE id = ? AND deleted_at IS NULL`,
+      [r.mysql_statement_id]
+    );
+    if (u.affectedRows === 0) {
+      await mysqlConn.rollback();
+      await pgClient.query('ROLLBACK');
+      await pg.query(
+        `INSERT INTO iris_statement_deletion_audit_logs (request_id, action, actor_id, details)
+         VALUES ($1, 'EXECUTE_FAILED', $2, $3::jsonb)`,
+        [id, decider, JSON.stringify({ reason: 'no rows affected in MySQL' })]
+      );
+      return res.status(409).json({ error: 'Statement sudah dihapus atau tidak ada' });
+    }
+    await mysqlConn.commit();
+
+    await pgClient.query(
+      `UPDATE iris_statement_deletion_requests
+          SET status = 'APPROVED', decided_by = $2::int, decided_at = NOW(),
+              decision_notes = $3::text, executed_at = NOW()
+        WHERE id = $1::int`,
+      [id, decider, notes]
+    );
+    await pgClient.query(
+      `INSERT INTO iris_statement_deletion_audit_logs (request_id, action, actor_id, details)
+       VALUES ($1, 'APPROVE', $2, $3::jsonb),
+              ($1, 'EXECUTE', $2, $3::jsonb)`,
+      [id, decider, JSON.stringify({ notes, affected: u.affectedRows })]
+    );
+    await pgClient.query('COMMIT');
+    res.json({ ok: true, id, status: 'APPROVED', affected: u.affectedRows });
+  } catch (err) {
+    try { if (mysqlConn) await mysqlConn.rollback(); } catch (_) {}
+    try { await pgClient.query('ROLLBACK'); } catch (_) {}
+    try {
+      await pg.query(
+        `INSERT INTO iris_statement_deletion_audit_logs (request_id, action, actor_id, details)
+         VALUES ($1, 'EXECUTE_FAILED', $2, $3::jsonb)`,
+        [id, decider, JSON.stringify({ error: err.message })]
+      );
+    } catch (_) {}
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (mysqlConn) mysqlConn.release();
+    pgClient.release();
+  }
+});
+
+// Reject
+app.post('/api/iris-statement-deletions/:id/reject', requireAuth, requireRole('approver', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const notes = req.body?.notes ? String(req.body.notes) : null;
+  const decider = req.session.userId;
+  try {
+    const { rows } = await pg.query(
+      `SELECT status, created_by FROM iris_statement_deletion_requests WHERE id = $1::int FOR UPDATE`, [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (rows[0].status !== 'PENDING') return res.status(409).json({ error: 'Already decided' });
+    if (rows[0].created_by === decider) return res.status(403).json({ error: 'Cannot decide own request' });
+
+    await pg.query(
+      `UPDATE iris_statement_deletion_requests
+          SET status = 'REJECTED', decided_by = $2::int, decided_at = NOW(),
+              decision_notes = $3::text
+        WHERE id = $1::int`,
+      [id, decider, notes]
+    );
+    await pg.query(
+      `INSERT INTO iris_statement_deletion_audit_logs (request_id, action, actor_id, details)
+       VALUES ($1, 'REJECT', $2, $3::jsonb)`,
+      [id, decider, JSON.stringify({ notes })]
+    );
+    res.json({ ok: true, id, status: 'REJECTED' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

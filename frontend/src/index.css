@@ -28,3 +28,9 @@ table.data { @apply w-full text-sm; }
 table.data thead th { @apply text-left px-3 py-2 bg-prestisa-50 text-prestisa-700 font-semibold border-b border-prestisa-100 text-xs uppercase tracking-wide; }
 table.data tbody td { @apply px-3 py-2 border-b border-prestisa-50 align-top; }
 table.data tbody tr:hover { @apply bg-prestisa-50/40; }
+table.data-compact { @apply text-[10px] leading-tight; }
+table.data-compact thead th { @apply px-1.5 py-1 text-[9px]; }
+table.data-compact tbody td { @apply px-1.5 py-0.5 align-middle !text-[10px]; }
+table.data-compact tbody td .font-mono { @apply !text-[10px]; }
+table.data-compact tfoot td { @apply px-1.5 py-1 !text-[10px]; }
+table.data-compact .pill { @apply px-1 py-0 text-[9px]; }

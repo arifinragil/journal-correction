@@ -128,11 +128,13 @@ export default function IrisStatementsPage() {
   const onApplyFilters = (e) => { e.preventDefault(); setFilters(f => ({ ...f, offset: 0 })); load(); };
 
   const onDelete = async (id) => {
-    if (!confirm(`Hapus statement #${id}? (soft delete)`)) return;
+    const reason = prompt(`Request hapus statement #${id}.\nMasukkan alasan (min 5 karakter):`);
+    if (reason == null) return;
+    if (reason.trim().length < 5) { alert('Alasan minimal 5 karakter'); return; }
     try {
-      await api.delete(`/iris-statements/${id}`);
-      load();
-    } catch (e) { alert('Gagal hapus: ' + (e.response?.data?.error || e.message)); }
+      const r = await api.post('/iris-statement-deletions', { mysql_statement_id: id, reason: reason.trim() });
+      alert(`Request dibuat #${r.data.id}. Menunggu approval.`);
+    } catch (e) { alert('Gagal: ' + (e.response?.data?.error || e.message)); }
   };
 
   return (
@@ -142,6 +144,7 @@ export default function IrisStatementsPage() {
           <h2 className="text-lg font-semibold sm:flex-1">💳 Account Statements</h2>
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={exportXlsx} className="btn-ghost" title="Export hasil filter ke Excel">📤 Export Excel</button>
+            <Link to="/iris-statement-deletions" className="btn-ghost">🗑 Request Hapus</Link>
             <Link to="/iris-statements/bulk-upload" className="btn-ghost">⤴ Bulk Upload Excel</Link>
             <Link to="/iris-statements/new" className="btn-primary">+ Statement Baru</Link>
           </div>
@@ -204,12 +207,8 @@ export default function IrisStatementsPage() {
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <Link to={`/iris-statements/${r.id}`} className="text-prestisa-700 hover:underline">Edit</Link>
-                    {canDelete && (
-                      <>
-                        {' · '}
-                        <button onClick={() => onDelete(r.id)} className="text-rose-700 hover:underline">Hapus</button>
-                      </>
-                    )}
+                    {' · '}
+                    <button onClick={() => onDelete(r.id)} className="text-rose-700 hover:underline">Request Hapus</button>
                   </td>
                 </tr>
               ))}

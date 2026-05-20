@@ -14,6 +14,8 @@ import JournalDeletionDetailPage from './pages/JournalDeletionDetailPage.jsx';
 import IrisStatementsPage from './pages/IrisStatementsPage.jsx';
 import IrisStatementFormPage from './pages/IrisStatementFormPage.jsx';
 import IrisStatementBulkUploadPage from './pages/IrisStatementBulkUploadPage.jsx';
+import IrisStatementDeletionsPage from './pages/IrisStatementDeletionsPage.jsx';
+import IrisStatementDeletionDetailPage from './pages/IrisStatementDeletionDetailPage.jsx';
 
 export const AuthCtx = React.createContext(null);
 
@@ -182,6 +184,8 @@ export default function App() {
           <Route path="/iris-statements/new" element={<IrisStatementFormPage />} />
           <Route path="/iris-statements/bulk-upload" element={<IrisStatementBulkUploadPage />} />
           <Route path="/iris-statements/:id" element={<IrisStatementFormPage />} />
+          <Route path="/iris-statement-deletions" element={<IrisStatementDeletionsPage />} />
+          <Route path="/iris-statement-deletions/:id" element={<IrisStatementDeletionDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Shell>

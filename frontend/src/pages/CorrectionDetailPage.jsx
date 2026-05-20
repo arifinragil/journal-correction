@@ -104,7 +104,7 @@ export default function CorrectionDetailPage() {
         <div className="px-5 py-3 border-b border-prestisa-100 font-semibold text-prestisa-800">
           Detail Entries — {entries.length} baris
         </div>
-        <div className="table-wrap"><table className="data min-w-[900px]">
+        <div className="table-wrap"><table className="data data-compact min-w-[900px]">
           <thead>
             <tr>
               <th rowSpan={2} className="bg-prestisa-50 text-prestisa-700">Entry ID</th>
@@ -181,13 +181,31 @@ export default function CorrectionDetailPage() {
         <div className="card p-5">
           <h3 className="font-semibold text-prestisa-800 mb-3">Lampiran</h3>
           {attachments.length === 0 && <div className="text-xs text-prestisa-400">Belum ada lampiran.</div>}
-          <ul className="space-y-1 text-sm">
-            {attachments.map(a => (
-              <li key={a.id} className="flex items-center justify-between py-1">
-                <a href={`/api/corrections/${id}/attachments/${a.id}`} target="_blank" rel="noreferrer" className="text-prestisa-700 hover:underline">📎 {a.original_name}</a>
-                <span className="text-xs text-prestisa-400">{(a.size_bytes / 1024).toFixed(0)} KB</span>
-              </li>
-            ))}
+          <ul className="space-y-2 text-sm">
+            {attachments.map(a => {
+              const url = `/api/corrections/${id}/attachments/${a.id}`;
+              const isImage = (a.mime_type || '').startsWith('image/');
+              return (
+                <li key={a.id} className="border border-prestisa-100 rounded-lg overflow-hidden">
+                  {isImage && (
+                    <a href={url} target="_blank" rel="noreferrer" className="block bg-prestisa-50/40">
+                      <img
+                        src={url}
+                        alt={a.original_name}
+                        loading="lazy"
+                        className="w-full max-h-64 object-contain bg-white"
+                      />
+                    </a>
+                  )}
+                  <div className="flex items-center justify-between gap-2 px-3 py-2">
+                    <a href={url} target="_blank" rel="noreferrer" className="text-prestisa-700 hover:underline truncate text-xs">
+                      {isImage ? '🖼️' : '📎'} {a.original_name}
+                    </a>
+                    <span className="text-xs text-prestisa-400 whitespace-nowrap">{(a.size_bytes / 1024).toFixed(0)} KB</span>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </div>
