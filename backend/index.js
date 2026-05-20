@@ -463,12 +463,17 @@ async function pushCorrectionToMySQL(client, correctionId) {
       if (!source_journal_id) throw new Error('ADD_ENTRIES requires source_journal_id');
       // Verify parent journal exists and not deleted
       const [parent] = await conn.query(
-        `SELECT id, transaction_date, company_code FROM journal WHERE id = ? AND deleted_at IS NULL`,
+        `SELECT id FROM journal WHERE id = ? AND deleted_at IS NULL`,
         [source_journal_id]
       );
       if (parent.length === 0) throw new Error(`MySQL journal id=${source_journal_id} not found or deleted`);
-      const fallbackDate = parent[0].transaction_date;
-      const fallbackCompany = parent[0].company_code;
+      const [parentEntry] = await conn.query(
+        `SELECT transaction_date, company_code FROM journal_entries
+          WHERE journal_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 1`,
+        [source_journal_id]
+      );
+      const fallbackDate = parentEntry[0]?.transaction_date || null;
+      const fallbackCompany = parentEntry[0]?.company_code || null;
 
       for (const e of entries) {
         await conn.query(
@@ -796,13 +801,13 @@ app.get('/api/journal-deletions/search', requireAuth, requireRole('maker', 'appr
     if (ids.length === 0) return res.json({ results: [] });
 
     const [journals] = await mysqlPool.query(
-      `SELECT id, entry_id, order_number, pr_finance_id, description,
-              transaction_date, company_code
+      `SELECT id, entry_id, order_number, pr_finance_id, description
          FROM journal WHERE id IN (?) AND deleted_at IS NULL`,
       [ids]
     );
     const [entries] = await mysqlPool.query(
       `SELECT je.id, je.journal_id, je.type, je.amount, je.account_id, je.notes,
+              je.transaction_date, je.company_code,
               a.account_number AS account_code, a.name AS account_name
          FROM journal_entries je
          LEFT JOIN accounts a ON a.id = je.account_id
@@ -823,11 +828,14 @@ app.get('/api/journal-deletions/search', requireAuth, requireRole('maker', 'appr
     );
     const refSet = new Set(refRows.map(r => r.source_journal_id));
 
-    const results = journals.map(j => ({
-      journal: j,
-      entries: entriesByJournal.get(j.id) || [],
-      has_correction_reference: refSet.has(j.id),
-    }));
+    const results = journals.map(j => {
+      const es = entriesByJournal.get(j.id) || [];
+      return {
+        journal: { ...j, transaction_date: es[0]?.transaction_date || null, company_code: es[0]?.company_code || null },
+        entries: es,
+        has_correction_reference: refSet.has(j.id),
+      };
+    });
     res.json({ results });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -840,8 +848,7 @@ app.get('/api/journal-deletions/search', requireAuth, requireRole('maker', 'appr
  */
 async function buildDeletionPayload({ scope, mysql_journal_id, mysql_entry_ids }) {
   const [journals] = await mysqlPool.query(
-    `SELECT id, entry_id, order_number, pr_finance_id, description,
-            transaction_date, company_code
+    `SELECT id, entry_id, order_number, pr_finance_id, description
        FROM journal WHERE id = ? AND deleted_at IS NULL`,
     [mysql_journal_id]
   );
@@ -851,6 +858,7 @@ async function buildDeletionPayload({ scope, mysql_journal_id, mysql_entry_ids }
   }
   const [entries] = await mysqlPool.query(
     `SELECT je.id, je.type, je.amount, je.account_id, je.notes,
+            je.transaction_date, je.company_code,
             a.account_number AS account_code, a.name AS account_name
        FROM journal_entries je
        LEFT JOIN accounts a ON a.id = je.account_id
@@ -888,7 +896,12 @@ async function buildDeletionPayload({ scope, mysql_journal_id, mysql_entry_ids }
   const has_correction_reference = refRows.length > 0;
 
   const snapshot = {
-    journal: { ...journals[0], captured_at: new Date().toISOString() },
+    journal: {
+      ...journals[0],
+      transaction_date: entries[0]?.transaction_date || null,
+      company_code: entries[0]?.company_code || null,
+      captured_at: new Date().toISOString(),
+    },
     entries,
   };
   return { snapshot, balance_after, has_correction_reference };
