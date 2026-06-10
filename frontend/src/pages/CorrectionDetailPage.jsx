@@ -36,10 +36,12 @@ export default function CorrectionDetailPage() {
   const canReview = isReviewer && h.status === 'PENDING';
   const canSubmit = (h.created_by === user.id || user.role === 'admin') && (h.status === 'DRAFT' || h.status === 'REJECTED');
 
-  const totalOrigD = entries.filter(e => e.original_type.toLowerCase() === 'debit').reduce((s, e) => s + Number(e.original_amount), 0);
-  const totalOrigC = entries.filter(e => e.original_type.toLowerCase() === 'credit').reduce((s, e) => s + Number(e.original_amount), 0);
-  const totalCorrD = entries.filter(e => e.corrected_type.toLowerCase() === 'debit').reduce((s, e) => s + Number(e.corrected_amount), 0);
-  const totalCorrC = entries.filter(e => e.corrected_type.toLowerCase() === 'credit').reduce((s, e) => s + Number(e.corrected_amount), 0);
+  const isAddMode = h.mode === 'ADD_ENTRIES';
+  const lc = (v) => String(v || '').toLowerCase();
+  const totalOrigD = entries.filter(e => lc(e.original_type) === 'debit').reduce((s, e) => s + Number(e.original_amount || 0), 0);
+  const totalOrigC = entries.filter(e => lc(e.original_type) === 'credit').reduce((s, e) => s + Number(e.original_amount || 0), 0);
+  const totalCorrD = entries.filter(e => lc(e.corrected_type) === 'debit').reduce((s, e) => s + Number(e.corrected_amount || 0), 0);
+  const totalCorrC = entries.filter(e => lc(e.corrected_type) === 'credit').reduce((s, e) => s + Number(e.corrected_amount || 0), 0);
 
   const act = async (path, body) => {
     setBusy(true);
@@ -81,6 +83,7 @@ export default function CorrectionDetailPage() {
             <div className="flex items-center gap-3 mb-1 flex-wrap">
               <h2 className="text-xl md:text-2xl font-extrabold text-prestisa-900 font-mono break-all">{h.correction_journal_id}</h2>
               <span className={statusPill(h.status)}>{h.status}</span>
+              {isAddMode && <span className="pill bg-indigo-100 text-indigo-700">ADD ENTRIES</span>}
               <PageHelp title="Detail Koreksi" items={[
                 'Halaman detail satu request koreksi. Lihat header (status, alasan, reviewer note) + daftar entry koreksi.',
                 'Status DRAFT: maker bisa edit ulang atau submit untuk approval.',
@@ -139,14 +142,14 @@ export default function CorrectionDetailPage() {
             {entries.map(e => (
               <tr key={e.id}>
                 <td className="font-mono text-xs text-prestisa-700 bg-prestisa-50/50">#{e.source_journal_entry_id}</td>
-                <td className={`${ORIG_BG} border-l-2 border-slate-300`}><span className={`pill ${e.original_type.toLowerCase() === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{e.original_type.toUpperCase()}</span></td>
-                <td className={`text-xs ${ORIG_BG}`}><div className="font-mono">{e.original_account_code}</div><div className="text-prestisa-500">{e.original_account_name}</div></td>
-                <td className={`text-right font-mono ${ORIG_BG}`}>{fmtIDR(e.original_amount)}</td>
+                <td className={`${ORIG_BG} border-l-2 border-slate-300`}>{e.original_type ? <span className={`pill ${lc(e.original_type) === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{String(e.original_type).toUpperCase()}</span> : <span className="text-prestisa-300 text-xs">—</span>}</td>
+                <td className={`text-xs ${ORIG_BG}`}><div className="font-mono">{e.original_account_code || '—'}</div><div className="text-prestisa-500">{e.original_account_name}</div></td>
+                <td className={`text-right font-mono ${ORIG_BG}`}>{e.original_amount != null ? fmtIDR(e.original_amount) : '—'}</td>
                 <td className={`text-xs max-w-[160px] truncate ${ORIG_BG}`} title={e.original_notes}>{e.original_notes}</td>
-                <td className={`text-xs ${ORIG_BG}`}>{fmtDateOnly(e.original_transaction_date)}</td>
+                <td className={`text-xs ${ORIG_BG}`}>{e.original_transaction_date ? fmtDateOnly(e.original_transaction_date) : '—'}</td>
                 <td className={`text-xs ${ORIG_BG}`}>{e.original_company_code}</td>
 
-                <td className={`${CORR_BG} border-l-2 border-amber-400 ${diffCell(e.original_type, e.corrected_type)}`}><span className={`pill ${e.corrected_type.toLowerCase() === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{e.corrected_type.toUpperCase()}</span></td>
+                <td className={`${CORR_BG} border-l-2 border-amber-400 ${diffCell(e.original_type, e.corrected_type)}`}><span className={`pill ${lc(e.corrected_type) === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{String(e.corrected_type || '').toUpperCase()}</span></td>
                 <td className={`text-xs ${CORR_BG} ${diffCell(e.original_account_id, e.corrected_account_id) || diffCell(e.original_account_name, e.corrected_account_name)}`}>
                   <div className="font-mono">{e.corrected_account_code}</div><div className="text-prestisa-500">{e.corrected_account_name}</div>
                 </td>

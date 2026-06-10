@@ -140,7 +140,7 @@ export default function CorrectionFormPage() {
     && corrBal.ok
     && reason.trim().length >= 10
     && allAccountsPicked
-    && entries.every(e => Number(e.corrected_amount) > 0);
+    && entries.every(e => Number(e.corrected_amount) >= 0);
 
   const submit = async (action) => {
     setErr(''); setBusy(true);
