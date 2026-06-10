@@ -8,6 +8,7 @@ import CorrectionFormPage from './pages/CorrectionFormPage.jsx';
 import CorrectionDetailPage from './pages/CorrectionDetailPage.jsx';
 import UserAdminPage from './pages/UserAdminPage.jsx';
 import AgentProposalsPage from './pages/AgentProposalsPage.jsx';
+import CompanyCodeMismatchPage from './pages/CompanyCodeMismatchPage.jsx';
 import JournalDeletionsPage from './pages/JournalDeletionsPage.jsx';
 import JournalDeletionNewPage from './pages/JournalDeletionNewPage.jsx';
 import JournalDeletionDetailPage from './pages/JournalDeletionDetailPage.jsx';
@@ -16,6 +17,9 @@ import IrisStatementFormPage from './pages/IrisStatementFormPage.jsx';
 import IrisStatementBulkUploadPage from './pages/IrisStatementBulkUploadPage.jsx';
 import IrisStatementDeletionsPage from './pages/IrisStatementDeletionsPage.jsx';
 import IrisStatementDeletionDetailPage from './pages/IrisStatementDeletionDetailPage.jsx';
+import CdjeDeletionsPage from './pages/CdjeDeletionsPage.jsx';
+import CdjeDeletionNewPage from './pages/CdjeDeletionNewPage.jsx';
+import CdjeDeletionDetailPage from './pages/CdjeDeletionDetailPage.jsx';
 
 export const AuthCtx = React.createContext(null);
 
@@ -97,9 +101,11 @@ function Shell({ user, onLogout, children }) {
           {link('/', 'Dashboard', '◧')}
           {link('/corrections', 'Corrections', '≡')}
           {(user.role === 'maker' || user.role === 'admin') && link('/corrections/new', 'New Correction', '+')}
+          {link('/company-code-mismatch', 'Company Code Mismatch', '🏷️')}
           {link('/agent-proposals', 'Agent Proposals', '🤖')}
           {link('/journal-deletions', 'Hapus Journal', '🗑')}
           {link('/iris-statements', 'Account Statements', '💳')}
+          {link('/iris-cdje-deletions', 'Hapus Link Clearing Doc', '🔗')}
           {user.role === 'admin' && link('/users', 'Users', '◔')}
         </nav>
         <div className={`p-3 ${collapsed ? 'md:p-2' : ''} border-t border-prestisa-100`}>
@@ -133,6 +139,7 @@ function Shell({ user, onLogout, children }) {
               '/corrections/new': 'New Correction',
               '/users': 'User Management',
               '/agent-proposals': 'Agent Proposals',
+              '/company-code-mismatch': 'Company Code Mismatch',
             })[loc.pathname] || (loc.pathname.startsWith('/corrections/') ? 'Correction Detail' : '')}</h1>
             <div className="hidden sm:block text-xs text-prestisa-500 truncate">journal.prestisa.net · Connected With Excellence</div>
           </div>
@@ -176,6 +183,7 @@ export default function App() {
           <Route path="/corrections/:id" element={<CorrectionDetailPage />} />
           <Route path="/users" element={<UserAdminPage />} />
           <Route path="/agent-proposals" element={<AgentProposalsPage />} />
+          <Route path="/company-code-mismatch" element={<CompanyCodeMismatchPage />} />
           <Route path="/agent-proposals/:id" element={<AgentProposalsPage />} />
           <Route path="/journal-deletions" element={<JournalDeletionsPage />} />
           <Route path="/journal-deletions/new" element={<JournalDeletionNewPage />} />
@@ -186,6 +194,9 @@ export default function App() {
           <Route path="/iris-statements/:id" element={<IrisStatementFormPage />} />
           <Route path="/iris-statement-deletions" element={<IrisStatementDeletionsPage />} />
           <Route path="/iris-statement-deletions/:id" element={<IrisStatementDeletionDetailPage />} />
+          <Route path="/iris-cdje-deletions" element={<CdjeDeletionsPage />} />
+          <Route path="/iris-cdje-deletions/new" element={<CdjeDeletionNewPage />} />
+          <Route path="/iris-cdje-deletions/:id" element={<CdjeDeletionDetailPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Shell>

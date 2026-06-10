@@ -1,14 +1,29 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api, { fmtIDR } from '../api';
 import PageHelp from '../components/PageHelp.jsx';
 
+const BANK_OPTIONS = [
+  { value: '',        label: 'Template Generic (Excel/CSV)' },
+  { value: 'bca',     label: 'BCA — Mutasi Rekening (.csv)' },
+  { value: 'bni',     label: 'BNI — Mutasi Rekening (.csv)' },
+  { value: 'bri',     label: 'BRI — Mutasi Rekening (.csv)' },
+  { value: 'mandiri', label: 'Mandiri — MCM Statement (.csv)' },
+];
+
 export default function IrisStatementBulkUploadPage() {
   const nav = useNavigate();
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState('');
+  const [bank, setBank] = useState('');
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+
+  useEffect(() => {
+    api.get('/iris-accounts').then(r => setAccounts(r.data || [])).catch(() => {});
+  }, []);
 
   const downloadTemplate = async () => {
     try {
@@ -22,12 +37,18 @@ export default function IrisStatementBulkUploadPage() {
     } catch (e) { alert('Gagal download template: ' + e.message); }
   };
 
+  const needAccount = !!bank; // bank mode requires account_id
+  const canPreview = !!file && (!needAccount || !!accountId);
+
   const doUpload = async (commit) => {
     if (!file) { setErr('Pilih file dulu'); return; }
+    if (needAccount && !accountId) { setErr('Pilih bank account dulu'); return; }
     setErr(''); setBusy(true);
     try {
       const fd = new FormData();
       fd.append('file', file);
+      if (bank) fd.append('bank', bank);
+      if (accountId) fd.append('account_id', accountId);
       const r = await api.post('/iris-statements/bulk-upload' + (commit ? '?commit=1' : ''), fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -45,37 +66,71 @@ export default function IrisStatementBulkUploadPage() {
     <div className="max-w-3xl space-y-4">
       <div className="card p-4 flex items-center gap-3 flex-wrap">
         <Link to="/iris-statements" className="btn-ghost">← Kembali</Link>
-        <h2 className="text-lg font-semibold flex-1">⤴ Bulk Upload Statements (Excel)</h2>
+        <h2 className="text-lg font-semibold flex-1">⤴ Bulk Upload Statements</h2>
         <PageHelp title="Bulk Upload" items={[
-          'Upload banyak baris statement sekaligus dari file Excel/CSV.',
-          'Step 1: download template (klik 📥 Download Template) supaya format kolom benar.',
-          'Step 2: isi data di template — kolom wajib: account_id, transaction_date, dan salah satu received/spent.',
-          'Step 3: pilih file, klik Preview untuk validasi (50 baris pertama ditampilkan, semua error dicek).',
-          'Step 4: kalau tidak ada error → klik "Upload & Simpan" untuk insert ke database (transactional).',
-          'Tombol simpan ter-disable jika ada error pada preview.',
+          'Upload banyak baris statement sekaligus dari file Excel/CSV — atau langsung dari CSV bank.',
+          'Pilih Bank Account dulu (wajib bila format = CSV bank). Semua baris akan masuk ke akun ini.',
+          'Pilih Format File: Generic (template Excel/CSV) atau salah satu bank (BCA/BNI/BRI/Mandiri).',
+          'Mode bank: upload file mutasi rekening langsung dari internet banking — parser otomatis menyesuaikan header & format tanggal.',
+          'Klik Preview untuk validasi (50 baris pertama tampil, semua error dicek).',
+          'Bila tidak ada error → klik "Upload & Simpan" untuk insert (transactional).',
         ]} />
-        <button onClick={downloadTemplate} className="btn-ghost">📥 Download Template</button>
+        <button onClick={downloadTemplate} className="btn-ghost">📥 Template Generic</button>
       </div>
 
       <div className="card p-4 space-y-3">
-        <p className="text-sm text-prestisa-700">
-          Unggah file <code>.xlsx</code> / <code>.xls</code> / <code>.csv</code>. Sheet pertama akan dibaca.
-          Kolom wajib: <code>account_id</code>, <code>transaction_date</code>, dan salah satu dari <code>received</code> atau <code>spent</code>.
-          Download template di kanan atas untuk format yang benar.
-        </p>
-        <input
-          type="file"
-          accept=".xlsx,.xls,.csv"
-          onChange={e => { setFile(e.target.files?.[0] || null); setPreview(null); }}
-          className="block w-full text-sm"
-        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Bank Account {needAccount && <span className="text-rose-600">*</span>}
+            </label>
+            <select className="input" value={accountId}
+              onChange={e => { setAccountId(e.target.value); setPreview(null); }}>
+              <option value="">— pilih akun —</option>
+              {accounts.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.account_number ? `[${a.account_number}] ` : ''}{a.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-prestisa-500 mt-1">
+              {needAccount
+                ? 'Semua baris di CSV akan dimasukkan ke akun ini.'
+                : 'Opsional untuk template generic; jika diisi akan override kolom account_id di file.'}
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Format File</label>
+            <select className="input" value={bank}
+              onChange={e => { setBank(e.target.value); setPreview(null); }}>
+              {BANK_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <p className="text-xs text-prestisa-500 mt-1">
+              {bank
+                ? `Parser akan mengikuti format CSV ${bank.toUpperCase()}.`
+                : 'Pakai template Excel/CSV standar (lihat tombol Template Generic).'}
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">File</label>
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={e => { setFile(e.target.files?.[0] || null); setPreview(null); }}
+            className="block w-full text-sm"
+          />
+        </div>
+
         {err && <div className="text-sm text-rose-700">{err}</div>}
+
         <div className="flex justify-end gap-2">
-          <button onClick={() => doUpload(false)} className="btn-ghost" disabled={!file || busy}>
+          <button onClick={() => doUpload(false)} className="btn-ghost" disabled={!canPreview || busy}>
             {busy ? 'Memproses…' : 'Preview'}
           </button>
           <button onClick={() => doUpload(true)} className="btn-primary"
-            disabled={!file || busy || (preview && preview.errors?.length > 0)}>
+            disabled={!canPreview || busy || (preview && preview.errors?.length > 0)}>
             {busy ? 'Menyimpan…' : 'Upload & Simpan'}
           </button>
         </div>

@@ -478,8 +478,8 @@ async function pushCorrectionToMySQL(client, correctionId) {
       for (const e of entries) {
         await conn.query(
           `INSERT INTO journal_entries
-             (journal_id, type, amount, account_id, notes, transaction_date, company_code, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+             (journal_id, type, amount, account_id, notes, report, transaction_date, company_code, created_at)
+           VALUES (?, ?, ?, ?, ?, '', ?, ?, NOW())`,
           [
             source_journal_id,
             e.corrected_type,
@@ -754,6 +754,138 @@ app.post('/api/agent-proposals/:id/decide', requireAuth, requireRole('maker', 'a
   );
   if (rowCount === 0) return res.status(404).json({ error: 'proposal not found or already decided' });
   res.json({ ok: true, id, status: decision });
+});
+
+// ---------------------------------------------------------------------------
+// Company Code Mismatch  (bank-account entries whose company_code != master)
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/company-code-mismatch?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD
+ * Auth: session (any role can view).
+ *
+ * Lists journal entries booked on a BANK account (an account that has rows in
+ * iris_account_statements) whose entry-level company_code differs from the
+ * account's master company_code. For each, resolves the contra line (same
+ * journal_id, adjacent id, opposite type, equal amount, same company_code).
+ *  - Unique contra found  -> "safe": returns a ready-to-post CORRECTION payload
+ *    (re-tag both lines to the bank account's master company_code, DRAFT).
+ *  - No unique contra      -> "complex": shown but not auto-correctable.
+ */
+app.get('/api/company-code-mismatch', requireAuth, async (req, res) => {
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const dateFrom = String(req.query.dateFrom || '');
+  const dateTo   = String(req.query.dateTo || '');
+  if (!dateRe.test(dateFrom) || !dateRe.test(dateTo)) {
+    return res.status(400).json({ error: 'dateFrom and dateTo must be YYYY-MM-DD' });
+  }
+  try {
+    // 1) mismatched bank entries
+    const [mism] = await mysqlPool.query(
+      `SELECT je.id, je.journal_id, je.type, je.amount, je.account_id,
+              je.notes, DATE_FORMAT(je.transaction_date,'%Y-%m-%d') AS transaction_date,
+              je.company_code AS entry_company_code,
+              a.account_number, a.name AS account_name, a.company_code AS master_company_code
+       FROM journal_entries je
+       JOIN accounts a ON a.id = je.account_id
+       WHERE je.deleted_at IS NULL
+         AND a.deleted_at  IS NULL
+         AND a.company_code  IS NOT NULL
+         AND je.company_code IS NOT NULL
+         AND je.company_code <> a.company_code
+         AND a.id IN (SELECT DISTINCT account_id FROM iris_account_statements)
+         AND je.transaction_date >= ? AND je.transaction_date <= ?
+       ORDER BY a.account_number, je.transaction_date, je.id`,
+      [dateFrom + ' 00:00:00', dateTo + ' 23:59:59']
+    );
+
+    if (mism.length === 0) return res.json({ safe: [], complex: [] });
+
+    // 2) fetch every line of the involved vouchers (for contra resolution)
+    const journalIds = [...new Set(mism.map(m => m.journal_id))];
+    const [allLines] = await mysqlPool.query(
+      `SELECT je.id, je.journal_id, je.type, je.amount, je.account_id,
+              je.notes, DATE_FORMAT(je.transaction_date,'%Y-%m-%d') AS transaction_date,
+              je.company_code,
+              a.account_number AS account_code, a.name AS account_name
+       FROM journal_entries je
+       LEFT JOIN accounts a ON a.id = je.account_id
+       WHERE je.deleted_at IS NULL AND je.journal_id IN (?)`,
+      [journalIds]
+    );
+    const byJournal = new Map();
+    for (const l of allLines) {
+      if (!byJournal.has(l.journal_id)) byJournal.set(l.journal_id, []);
+      byJournal.get(l.journal_id).push(l);
+    }
+
+    const safe = [];
+    const complex = [];
+    for (const m of mism) {
+      const mates = (byJournal.get(m.journal_id) || []).filter(l =>
+        l.id !== m.id &&
+        (l.id === m.id + 1 || l.id === m.id - 1) &&
+        String(l.type).toLowerCase() !== String(m.type).toLowerCase() &&
+        Number(l.amount) === Number(m.amount) &&
+        l.company_code === m.entry_company_code
+      );
+      const meta = {
+        bank_entry_id: m.id,
+        journal_id: m.journal_id,
+        account_number: m.account_number,
+        account_name: m.account_name,
+        master_company_code: m.master_company_code,
+        entry_company_code: m.entry_company_code,
+        type: m.type,
+        amount: Number(m.amount),
+        transaction_date: m.transaction_date,
+        notes: m.notes,
+      };
+      if (mates.length !== 1) { complex.push({ ...meta, contra_candidates: mates.length }); continue; }
+
+      const contra = mates[0];
+      const target = m.master_company_code;
+      const bankLine = {
+        source_journal_entry_id: m.id,
+        original_type: m.type, original_amount: Number(m.amount),
+        original_account_id: m.account_id, original_account_code: m.account_number, original_account_name: m.account_name,
+        original_notes: m.notes, original_transaction_date: m.transaction_date, original_company_code: m.entry_company_code,
+        corrected_type: m.type, corrected_amount: Number(m.amount),
+        corrected_account_id: m.account_id, corrected_account_code: m.account_number, corrected_account_name: m.account_name,
+        corrected_notes: m.notes, corrected_transaction_date: m.transaction_date, corrected_company_code: target,
+      };
+      const contraLine = {
+        source_journal_entry_id: contra.id,
+        original_type: contra.type, original_amount: Number(contra.amount),
+        original_account_id: contra.account_id, original_account_code: contra.account_code, original_account_name: contra.account_name,
+        original_notes: contra.notes, original_transaction_date: contra.transaction_date, original_company_code: contra.company_code,
+        corrected_type: contra.type, corrected_amount: Number(contra.amount),
+        corrected_account_id: contra.account_id, corrected_account_code: contra.account_code, corrected_account_name: contra.account_name,
+        corrected_notes: contra.notes, corrected_transaction_date: contra.transaction_date, corrected_company_code: target,
+      };
+      const reason =
+        `Koreksi company code: rekening bank ${m.account_number} (${target}), entry ${m.id} & contra ${contra.id} ` +
+        `salah tag ${m.entry_company_code} -> di-retag ke ${target}.`;
+      safe.push({
+        ...meta,
+        contra_entry_id: contra.id,
+        contra_account_code: contra.account_code,
+        contra_account_name: contra.account_name,
+        target_company_code: target,
+        reason,
+        payload: {
+          mode: 'CORRECTION',
+          reason,
+          source_journal_id: m.journal_id,
+          source_journal_entry_id: m.id,
+          entries: [bankLine, contraLine],
+        },
+      });
+    }
+    res.json({ safe, complex });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1133,6 +1265,7 @@ app.post('/api/journal-deletions/:id/reject', requireAuth, requireRole('approver
 // iris_account_statements: view / add / edit / delete + bulk Excel upload
 // ============================================================================
 const XLSX = require('xlsx');
+const { parseBankCsv, SUPPORTED_BANKS } = require('./bankCsvParsers');
 
 const uploadXlsx = multer({
   storage: multer.memoryStorage(),
@@ -1237,10 +1370,11 @@ app.get('/api/iris-statements', requireAuth, async (req, res) => {
     const [rows] = await mysqlPool.query(
       `SELECT s.id, s.account_id, a.name AS account_name, a.account_number, s.description, s.received, s.spent,
               s.reconciled, s.close_balance, s.transaction_date, s.created_at, s.updated_at,
-              cd.document_number AS clearing_document_number
+              (SELECT cd.document_number FROM iris_clearing_document cd
+                 WHERE cd.bank_statement_id = s.id
+                 ORDER BY cd.id DESC LIMIT 1) AS clearing_document_number
          FROM iris_account_statements s
          LEFT JOIN accounts a ON a.id = s.account_id
-         LEFT JOIN iris_clearing_document cd ON cd.bank_statement_id = s.id
         WHERE ${where}
         ORDER BY ${order}
         LIMIT ? OFFSET ?`,
@@ -1262,10 +1396,11 @@ app.get('/api/iris-statements/export.xlsx', requireAuth, async (req, res) => {
       `SELECT s.id, s.transaction_date, a.account_number, s.account_id, a.name AS account_name,
               s.description, s.received, s.spent, s.reconciled, s.close_balance,
               s.created_at, s.updated_at,
-              cd.document_number AS clearing_document_number
+              (SELECT cd.document_number FROM iris_clearing_document cd
+                 WHERE cd.bank_statement_id = s.id
+                 ORDER BY cd.id DESC LIMIT 1) AS clearing_document_number
          FROM iris_account_statements s
          LEFT JOIN accounts a ON a.id = s.account_id
-         LEFT JOIN iris_clearing_document cd ON cd.bank_statement_id = s.id
         WHERE ${where}
         ORDER BY ${order}
         LIMIT 100000`, params
@@ -1640,6 +1775,299 @@ app.post('/api/iris-statement-deletions/:id/reject', requireAuth, requireRole('a
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── iris_clearing_document_journal_entries deletion approval flow ──────────
+// Suggestions: journal_entry_ids that have >1 rows in the junction (duplicate links)
+app.get('/api/iris-cdje/suggestions', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
+  try {
+    const [rows] = await mysqlPool.query(
+      `SELECT cdj.journal_entry_id,
+              COUNT(*) AS link_count,
+              GROUP_CONCAT(DISTINCT cd.bank_statement_id ORDER BY cd.bank_statement_id) AS bank_statement_ids,
+              GROUP_CONCAT(DISTINCT cd.document_number ORDER BY cd.document_number) AS document_numbers,
+              MAX(je.notes) AS je_notes,
+              MAX(je.amount) AS je_amount,
+              MAX(je.type) AS je_type,
+              MAX(je.journal_id) AS je_journal_id,
+              MAX(je.account_id) AS je_account_id,
+              MAX(a.account_number) AS account_number,
+              MAX(a.name) AS account_name
+         FROM iris_clearing_document_journal_entries cdj
+         LEFT JOIN iris_clearing_document cd ON cd.id = cdj.clearing_document_id
+         LEFT JOIN journal_entries je ON je.id = cdj.journal_entry_id
+         LEFT JOIN accounts a ON a.id = je.account_id
+        GROUP BY cdj.journal_entry_id
+       HAVING COUNT(*) > 1
+        ORDER BY link_count DESC, cdj.journal_entry_id DESC
+        LIMIT ?`, [limit]
+    );
+    res.json({ items: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Lookup: snapshot rows matching a journal_entry_id (called by maker before creating request)
+app.get('/api/iris-cdje/lookup', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const je = parseInt(req.query.journal_entry_id, 10);
+  if (!Number.isInteger(je) || je <= 0) return res.status(400).json({ error: 'journal_entry_id required' });
+  try {
+    const [rows] = await mysqlPool.query(
+      `SELECT cdj.id AS cdje_id, cdj.clearing_document_id, cdj.journal_entry_id, cdj.created_at,
+              cd.document_number, cd.bank_statement_id, cd.deleted_at AS cd_deleted_at,
+              s.transaction_date AS stmt_date, s.description AS stmt_description,
+              s.received AS stmt_received, s.spent AS stmt_spent, s.account_id AS stmt_account_id,
+              a.account_number, a.name AS account_name,
+              je.amount AS je_amount, je.type AS je_type, je.notes AS je_notes,
+              je.account_id AS je_account_id, je.journal_id AS je_journal_id, je.status AS je_status,
+              je.deleted_at AS je_deleted_at,
+              (SELECT MAX(cd2.id) FROM iris_clearing_document cd2
+                WHERE cd2.bank_statement_id = cd.bank_statement_id) AS latest_cd_id
+         FROM iris_clearing_document_journal_entries cdj
+         LEFT JOIN iris_clearing_document cd ON cd.id = cdj.clearing_document_id
+         LEFT JOIN iris_account_statements s ON s.id = cd.bank_statement_id
+         LEFT JOIN accounts a ON a.id = s.account_id
+         LEFT JOIN journal_entries je ON je.id = cdj.journal_entry_id
+        WHERE cdj.journal_entry_id = ?
+        ORDER BY cdj.id`, [je]
+    );
+    const items = rows.map(r => {
+      const cdMissing = r.clearing_document_id != null && r.bank_statement_id == null;
+      const stmtMissing = r.bank_statement_id != null && r.stmt_date == null;
+      const notLatestCd = r.bank_statement_id != null && r.latest_cd_id != null && r.clearing_document_id !== r.latest_cd_id;
+      const accountMismatch = r.je_account_id != null && r.stmt_account_id != null && r.je_account_id !== r.stmt_account_id;
+      const isOrphan = cdMissing || stmtMissing || notLatestCd;
+      const reasons = [];
+      if (cdMissing) reasons.push('clearing_document hilang');
+      if (stmtMissing) reasons.push('bank_statement hilang');
+      if (notLatestCd) reasons.push(`bukan CD terbaru (latest=${r.latest_cd_id})`);
+      if (accountMismatch) reasons.push(`account mismatch (je=${r.je_account_id} vs stmt=${r.stmt_account_id})`);
+      return { ...r, is_orphan: isOrphan, pair_warnings: reasons };
+    });
+    res.json({ items });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function loadCdjeSnapshot(journalEntryId) {
+  const [rows] = await mysqlPool.query(
+    `SELECT cdj.id AS cdje_id, cdj.clearing_document_id, cdj.journal_entry_id, cdj.created_at,
+            cd.document_number, cd.bank_statement_id,
+            s.transaction_date AS stmt_date, s.description AS stmt_description,
+            s.received AS stmt_received, s.spent AS stmt_spent,
+            a.account_number, a.name AS account_name,
+            je.amount AS je_amount, je.type AS je_type, je.notes AS je_notes,
+            je.account_id AS je_account_id, je.journal_id AS je_journal_id
+       FROM iris_clearing_document_journal_entries cdj
+       LEFT JOIN iris_clearing_document cd ON cd.id = cdj.clearing_document_id
+       LEFT JOIN iris_account_statements s ON s.id = cd.bank_statement_id
+       LEFT JOIN accounts a ON a.id = s.account_id
+       LEFT JOIN journal_entries je ON je.id = cdj.journal_entry_id
+      WHERE cdj.journal_entry_id = ?
+      ORDER BY cdj.id`, [journalEntryId]
+  );
+  return rows;
+}
+
+// Create deletion request (maker)
+app.post('/api/iris-cdje-deletions', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const journal_entry_id = parseInt(req.body?.journal_entry_id, 10);
+  const reason = String(req.body?.reason || '').trim();
+  const cdjeIdsRaw = Array.isArray(req.body?.cdje_ids) ? req.body.cdje_ids : [];
+  const cdje_ids = cdjeIdsRaw.map(x => parseInt(x, 10)).filter(n => Number.isInteger(n) && n > 0);
+  if (!Number.isInteger(journal_entry_id) || journal_entry_id <= 0) return res.status(400).json({ error: 'journal_entry_id required' });
+  if (reason.length < 5) return res.status(400).json({ error: 'reason minimal 5 karakter' });
+  if (cdje_ids.length === 0) return res.status(400).json({ error: 'Pilih minimal satu baris junction untuk dihapus' });
+  try {
+    const snapAll = await loadCdjeSnapshot(journal_entry_id);
+    if (snapAll.length === 0) return res.status(404).json({ error: 'Tidak ada baris di iris_clearing_document_journal_entries untuk journal_entry_id ini' });
+
+    const allIds = new Set(snapAll.map(r => r.cdje_id));
+    const invalid = cdje_ids.filter(id => !allIds.has(id));
+    if (invalid.length) return res.status(400).json({ error: `cdje_id berikut tidak cocok dengan journal_entry_id ${journal_entry_id}: ${invalid.join(', ')}` });
+
+    const { rows: existing } = await pg.query(
+      `SELECT id FROM iris_cdje_deletion_requests
+        WHERE mysql_journal_entry_id = $1 AND status = 'PENDING' LIMIT 1`, [journal_entry_id]
+    );
+    if (existing.length > 0) return res.status(409).json({ error: `Sudah ada request pending #${existing[0].id} untuk journal_entry_id ini` });
+
+    const toDelete = new Set(cdje_ids);
+    const targets = snapAll.filter(r => toDelete.has(r.cdje_id));
+    const keep = snapAll.filter(r => !toDelete.has(r.cdje_id));
+    const snapshot = {
+      journal_entry_id,
+      cdje_ids,
+      rows: targets,
+      keep_rows: keep,
+      captured_at: new Date().toISOString(),
+    };
+    const { rows } = await pg.query(
+      `INSERT INTO iris_cdje_deletion_requests (mysql_journal_entry_id, snapshot, reason, created_by)
+       VALUES ($1::int, $2::jsonb, $3::text, $4::int) RETURNING id`,
+      [journal_entry_id, JSON.stringify(snapshot), reason, req.session.userId]
+    );
+    const reqId = rows[0].id;
+    await pg.query(
+      `INSERT INTO iris_cdje_deletion_audit_logs (request_id, action, actor_id, details)
+       VALUES ($1, 'CREATE', $2, $3::jsonb)`,
+      [reqId, req.session.userId, JSON.stringify({ journal_entry_id, cdje_ids, delete_count: targets.length, keep_count: keep.length, reason })]
+    );
+    res.status(201).json({ ok: true, id: reqId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// List
+app.get('/api/iris-cdje-deletions', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const status = req.query.status ? String(req.query.status).toUpperCase() : null;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+  try {
+    const params = [];
+    const where = [];
+    if (status && ['PENDING', 'APPROVED', 'REJECTED'].includes(status)) {
+      params.push(status); where.push(`r.status = $${params.length}`);
+    }
+    params.push(limit);
+    const { rows } = await pg.query(
+      `SELECT r.id, r.mysql_journal_entry_id, r.reason, r.status, r.created_at, r.decided_at,
+              r.decision_notes,
+              uc.username AS created_by_username, uc.full_name AS created_by_name,
+              ud.username AS decided_by_username, ud.full_name AS decided_by_name,
+              jsonb_array_length(r.snapshot->'rows') AS row_count
+         FROM iris_cdje_deletion_requests r
+         LEFT JOIN users uc ON uc.id = r.created_by
+         LEFT JOIN users ud ON ud.id = r.decided_by
+        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY r.created_at DESC LIMIT $${params.length}`,
+      params
+    );
+    res.json({ items: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Detail
+app.get('/api/iris-cdje-deletions/:id', requireAuth, requireRole('maker', 'approver', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const { rows } = await pg.query(
+      `SELECT r.*, uc.username AS created_by_username, uc.full_name AS created_by_name,
+              ud.username AS decided_by_username, ud.full_name AS decided_by_name
+         FROM iris_cdje_deletion_requests r
+         LEFT JOIN users uc ON uc.id = r.created_by
+         LEFT JOIN users ud ON ud.id = r.decided_by
+        WHERE r.id = $1::int`, [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const { rows: logs } = await pg.query(
+      `SELECT l.id, l.action, l.actor_id, l.details, l.created_at,
+              u.username AS actor_username, u.full_name AS actor_name
+         FROM iris_cdje_deletion_audit_logs l
+         LEFT JOIN users u ON u.id = l.actor_id
+        WHERE l.request_id = $1::int ORDER BY l.id`, [id]
+    );
+    res.json({ request: rows[0], logs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Approve → executes DELETE on MySQL junction table
+app.post('/api/iris-cdje-deletions/:id/approve', requireAuth, requireRole('approver', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const notes = req.body?.notes ? String(req.body.notes) : null;
+  const decider = req.session.userId;
+
+  const pgClient = await pg.connect();
+  let mysqlConn = null;
+  try {
+    await pgClient.query('BEGIN');
+    const { rows } = await pgClient.query(
+      `SELECT id, mysql_journal_entry_id, status, created_by, snapshot
+         FROM iris_cdje_deletion_requests WHERE id = $1::int FOR UPDATE`, [id]
+    );
+    if (rows.length === 0) { await pgClient.query('ROLLBACK'); return res.status(404).json({ error: 'Not found' }); }
+    const r = rows[0];
+    if (r.status !== 'PENDING') { await pgClient.query('ROLLBACK'); return res.status(409).json({ error: 'Already decided' }); }
+    if (r.created_by === decider) { await pgClient.query('ROLLBACK'); return res.status(403).json({ error: 'Cannot approve own request (separation of duty)' }); }
+
+    const cdjeIds = Array.isArray(r.snapshot?.cdje_ids) ? r.snapshot.cdje_ids.filter(n => Number.isInteger(n) && n > 0) : [];
+    if (cdjeIds.length === 0) { await pgClient.query('ROLLBACK'); return res.status(400).json({ error: 'Snapshot tidak memiliki cdje_ids untuk dihapus' }); }
+
+    mysqlConn = await mysqlPool.getConnection();
+    await mysqlConn.beginTransaction();
+    const [u] = await mysqlConn.query(
+      `DELETE FROM iris_clearing_document_journal_entries
+        WHERE id IN (?) AND journal_entry_id = ?`,
+      [cdjeIds, r.mysql_journal_entry_id]
+    );
+    if (u.affectedRows === 0) {
+      await mysqlConn.rollback();
+      await pgClient.query('ROLLBACK');
+      await pg.query(
+        `INSERT INTO iris_cdje_deletion_audit_logs (request_id, action, actor_id, details)
+         VALUES ($1, 'EXECUTE_FAILED', $2, $3::jsonb)`,
+        [id, decider, JSON.stringify({ reason: 'no rows affected in MySQL' })]
+      );
+      return res.status(409).json({ error: 'Tidak ada baris yang dihapus (mungkin sudah dihapus)' });
+    }
+    await mysqlConn.commit();
+
+    await pgClient.query(
+      `UPDATE iris_cdje_deletion_requests
+          SET status = 'APPROVED', decided_by = $2::int, decided_at = NOW(),
+              decision_notes = $3::text, executed_at = NOW()
+        WHERE id = $1::int`,
+      [id, decider, notes]
+    );
+    await pgClient.query(
+      `INSERT INTO iris_cdje_deletion_audit_logs (request_id, action, actor_id, details)
+       VALUES ($1, 'APPROVE', $2, $3::jsonb),
+              ($1, 'EXECUTE', $2, $3::jsonb)`,
+      [id, decider, JSON.stringify({ notes, affected: u.affectedRows })]
+    );
+    await pgClient.query('COMMIT');
+    res.json({ ok: true, id, status: 'APPROVED', affected: u.affectedRows });
+  } catch (err) {
+    try { if (mysqlConn) await mysqlConn.rollback(); } catch (_) {}
+    try { await pgClient.query('ROLLBACK'); } catch (_) {}
+    try {
+      await pg.query(
+        `INSERT INTO iris_cdje_deletion_audit_logs (request_id, action, actor_id, details)
+         VALUES ($1, 'EXECUTE_FAILED', $2, $3::jsonb)`,
+        [id, decider, JSON.stringify({ error: err.message })]
+      );
+    } catch (_) {}
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (mysqlConn) mysqlConn.release();
+    pgClient.release();
+  }
+});
+
+// Reject
+app.post('/api/iris-cdje-deletions/:id/reject', requireAuth, requireRole('approver', 'admin'), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const notes = req.body?.notes ? String(req.body.notes) : null;
+  const decider = req.session.userId;
+  try {
+    const { rows } = await pg.query(
+      `SELECT status, created_by FROM iris_cdje_deletion_requests WHERE id = $1::int FOR UPDATE`, [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (rows[0].status !== 'PENDING') return res.status(409).json({ error: 'Already decided' });
+    if (rows[0].created_by === decider) return res.status(403).json({ error: 'Cannot decide own request' });
+
+    await pg.query(
+      `UPDATE iris_cdje_deletion_requests
+          SET status = 'REJECTED', decided_by = $2::int, decided_at = NOW(),
+              decision_notes = $3::text
+        WHERE id = $1::int`,
+      [id, decider, notes]
+    );
+    await pg.query(
+      `INSERT INTO iris_cdje_deletion_audit_logs (request_id, action, actor_id, details)
+       VALUES ($1, 'REJECT', $2, $3::jsonb)`,
+      [id, decider, JSON.stringify({ notes })]
+    );
+    res.json({ ok: true, id, status: 'REJECTED' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Excel template download
 app.get('/api/iris-statements/template/xlsx', requireAuth, (_req, res) => {
   const ws = XLSX.utils.aoa_to_sheet([
@@ -1669,14 +2097,30 @@ app.get('/api/iris-statements/template/xlsx', requireAuth, (_req, res) => {
 });
 
 // Bulk upload: parse first; if ?commit=1 then insert. Otherwise return preview.
+// Modes:
+//  - default (no `bank` field): legacy Excel/CSV with column account_id, transaction_date, received/spent.
+//  - bank=bca|bni|bri|mandiri + account_id: raw bank CSV; account_id from form applies to ALL rows.
 app.post('/api/iris-statements/bulk-upload', requireAuth, requireRole('maker', 'approver', 'admin'),
   uploadXlsx.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'File required' });
     try {
-      const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const raw = XLSX.utils.sheet_to_json(sheet, { defval: null });
-      const parsed = raw.map(parseStatementRow);
+      const bank = req.body?.bank ? String(req.body.bank).toLowerCase() : null;
+      const overrideAccountId = req.body?.account_id ? parseInt(req.body.account_id, 10) : null;
+      let parsed;
+      if (bank) {
+        if (!SUPPORTED_BANKS.includes(bank)) return res.status(400).json({ error: `Bank tidak didukung. Pilihan: ${SUPPORTED_BANKS.join(', ')}` });
+        if (!Number.isInteger(overrideAccountId) || overrideAccountId <= 0) return res.status(400).json({ error: 'account_id wajib dipilih untuk format bank' });
+        const bankRows = parseBankCsv(bank, req.file.buffer);
+        parsed = bankRows.map(r => ({ ...r, account_id: overrideAccountId }));
+      } else {
+        const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json(sheet, { defval: null });
+        parsed = raw.map(parseStatementRow);
+        if (Number.isInteger(overrideAccountId) && overrideAccountId > 0) {
+          parsed = parsed.map(r => ({ ...r, account_id: overrideAccountId }));
+        }
+      }
       const errors = [];
       parsed.forEach((r, i) => { const e = validateStatement(r, i + 2); if (e) errors.push(e); });
 
